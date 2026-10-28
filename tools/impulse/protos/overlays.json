@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "file": "account.proto",
+      "message": "RegisterPasskeyRequest",
+      "name": "software_emoji_id",
+      "type": "int64",
+      "optional": true,
+      "canon": "account.registerPasskey#55b41fd6 credential:InputPasskeyCredential = Passkey (api.tl LAYER 229:2440)",
+      "reason": "Fork-only passkey emoji metadata retained on the canon request until the transport contract is separated.",
+      "issue": "204"
+    },
+    {
+      "kind": "message",
+      "file": "account.proto",
+      "name": "GetContactSignUpNotificationResponse",
+      "fields": [
+        {
+          "name": "value",
+          "type": "bool",
+          "optional": true
+        }
+      ],
+      "canon": "account.getContactSignUpNotification#9f07c728 = Bool (api.tl LAYER 229:2365)",
+      "reason": "Preserves boolFalse until the shared BoolResponse can represent both Telegram Bool constructors.",
+      "issue": "203"
+    },
+    {
+      "kind": "tl",
+      "file": "auth.proto",
+      "name": "cancelWebTokenAuthorization",
+      "tl": "auth.cancelWebTokenAuthorization#490dada1 web_auth_token:string = Bool;",
+      "canon": "auth.cancelWebTokenAuthorization#490dada1 web_auth_token:string = Bool -- Telegram Web K schema.json (layer 229, ImpulseM.Client.Web.K-upstream/src/scripts/in/schema.json, methods[id=1225633185]); crc32 of the definition verified by the generator; absent from tdesktop api.tl LAYER 229",
+      "reason": "A real method of the layer the web client negotiates that the vendored tdesktop api.tl has not yet picked up (tdesktop lags the web schema, as it does for auth.initFirebasePnvLogin). Declared as a TL line the generator parses exactly like an api.tl function, so its request message, ledger numbers and RPC are generated, not hand-written. Remove this entry the moment tdesktop's api.tl carries the line; the generator refuses the duplicate.",
+      "issue": "728"
+    },
+    {
+      "kind": "message",
+      "file": "channels.proto",
+      "name": "EditAboutRequest",
+      "fields": [
+        {
+          "name": "channel",
+          "type": "v1.InputChannel",
+          "optional": false
+        },
+        {
+          "name": "about",
+          "type": "string",
+          "optional": false
+        }
+      ],
+      "canon": "messages.editChatAbout#def60797 peer:InputPeer about:string = Bool (api.tl LAYER 229:2586)",
+      "reason": "Request contract for the non-canon channels.EditAbout convenience RPC.",
+      "issue": "202"
+    },
+    {
+      "kind": "rpc",
+      "file": "channels.proto",
+      "service": "Channels",
+      "name": "EditAbout",
+      "request": "EditAboutRequest",
+      "response": "BoolResponse",
+      "reason": "No channels.editAbout in api.tl's ---functions--- section; real canon method is messages.editChatAbout (peer-addressed). This RPC is an internal convenience wrapper around the same EditAboutCommand, not a second canon method.",
+      "issue": "202"
+    },
+    {
+      "kind": "field",
+      "file": "messages.proto",
+      "message": "CreateChatRequest",
+      "name": "random_id",
+      "type": "int64",
+      "optional": true,
+      "canon": "messages.createChat#92ceddd4 flags:# users:Vector<InputUser> title:string ttl_period:flags.0?int = messages.InvitedUsers (api.tl LAYER 229:2507)",
+      "reason": "messages.createChat has no random_id, unlike messages.sendMessage which does. A retry after a lost response therefore creates a second chat, and canon offers the client no way to say 'this is the same request'. The field is a SETNX-keyed Redis dedup with a 600s window so a retry inside it returns the same chat_id; a client that does not send it gets canon's behaviour unchanged, which is duplicate chats on retry.",
+      "issue": "204"
+    },
+    {
+      "kind": "message",
+      "file": "messages.proto",
+      "name": "ReportMessagesDeliveryResponse",
+      "fields": [
+        {
+          "name": "value",
+          "type": "bool",
+          "optional": true
+        }
+      ],
+      "canon": "messages.reportMessagesDelivery#5a6d7395 flags:# push:flags.0?true peer:InputPeer id:Vector<int> = Bool (api.tl LAYER 229:2710)",
+      "reason": "Preserves boolFalse for ids the caller cannot see until the shared BoolResponse can represent both Telegram Bool constructors.",
+      "issue": "654"
+    },
+    {
+      "kind": "message",
+      "file": "upload.proto",
+      "name": "AbandonUploadRequest",
+      "fields": [
+        {
+          "name": "file_id",
+          "type": "int64",
+          "optional": false
+        }
+      ],
+      "canon": "upload.getFile#be5335be flags:# precise:flags.0?true cdn_supported:flags.1?true location:InputFileLocation offset:long limit:int = upload.File (api.tl LAYER 229:2757); api.tl declares no upload.abandonUpload method",
+      "reason": "Request contract for explicitly releasing staged upload bytes and quota.",
+      "issue": "136"
+    },
+    {
+      "kind": "message",
+      "file": "upload.proto",
+      "name": "MintDownloadTokenRequest",
+      "fields": [
+        {
+          "name": "location",
+          "type": "v1.InputFileLocation",
+          "optional": false
+        },
+        {
+          "name": "size_variant",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "canon": "upload.getFile#be5335be flags:# precise:flags.0?true cdn_supported:flags.1?true location:InputFileLocation offset:long limit:int = upload.File (api.tl LAYER 229:2757); api.tl declares no upload.mintDownloadToken method",
+      "reason": "Request contract for ImpulseM's server-proxied browser download token.",
+      "issue": "136"
+    },
+    {
+      "kind": "message",
+      "file": "upload.proto",
+      "name": "MintDownloadTokenResponse",
+      "fields": [
+        {
+          "name": "token_string",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "expires_at_unix",
+          "type": "int64",
+          "optional": false
+        }
+      ],
+      "canon": "upload.getFile#be5335be flags:# precise:flags.0?true cdn_supported:flags.1?true location:InputFileLocation offset:long limit:int = upload.File (api.tl LAYER 229:2757); api.tl declares no upload.mintDownloadToken result",
+      "reason": "Response contract for ImpulseM's server-proxied browser download token.",
+      "issue": "136"
+    },
+    {
+      "kind": "rpc",
+      "file": "upload.proto",
+      "service": "Upload",
+      "name": "AbandonUpload",
+      "request": "AbandonUploadRequest",
+      "response": "BoolResponse",
+      "reason": "No upload.abandonUpload exists in api.tl; this ImpulseM lifecycle extension lets a client release staged bytes and quota after cancellation.",
+      "issue": "136"
+    },
+    {
+      "kind": "rpc",
+      "file": "upload.proto",
+      "service": "Upload",
+      "name": "MintDownloadToken",
+      "request": "MintDownloadTokenRequest",
+      "response": "MintDownloadTokenResponse",
+      "reason": "No upload.mintDownloadToken in api.tl; this mints ImpulseM's own short-TTL signed browser-download token, a mechanism real TL clients never need since they never do a bare HTTPS download.",
+      "issue": "136"
+    },
+    {
+      "kind": "field",
+      "file": "v1/types.proto",
+      "message": "AuthAuthorizationValue",
+      "name": "refresh_token",
+      "type": "string",
+      "optional": false,
+      "canon": "auth.authorization#2ea2c0d4 flags:# setup_password_required:flags.1?true otherwise_relogin_days:flags.1?int tmp_sessions:flags.0?int future_auth_token:flags.2?bytes user:User = auth.Authorization (api.tl LAYER 229:238)",
+      "reason": "JWT session mechanism: Canon carries identity in the MTProto auth_key established by the DH handshake -- in the TRANSPORT, not in the response body, which is why auth.authorization has no token field. ImpulseM's client transport is gRPC, which has no auth_key, so the signed session token has nowhere else to arrive. This follows from the board's transport decision, not from a shortcut.",
+      "issue": null
+    },
+    {
+      "kind": "field",
+      "file": "v1/types.proto",
+      "message": "AuthAuthorizationValue",
+      "name": "session_token",
+      "type": "string",
+      "optional": false,
+      "canon": "auth.authorization#2ea2c0d4 flags:# setup_password_required:flags.1?true otherwise_relogin_days:flags.1?int tmp_sessions:flags.0?int future_auth_token:flags.2?bytes user:User = auth.Authorization (api.tl LAYER 229:238)",
+      "reason": "JWT session mechanism: Canon carries identity in the MTProto auth_key established by the DH handshake -- in the TRANSPORT, not in the response body, which is why auth.authorization has no token field. ImpulseM's client transport is gRPC, which has no auth_key, so the signed session token has nowhere else to arrive. This follows from the board's transport decision, not from a shortcut.",
+      "issue": null
+    }
+  ]
+}

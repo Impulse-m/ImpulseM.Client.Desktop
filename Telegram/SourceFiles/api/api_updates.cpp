@@ -522,14 +522,23 @@ void Updates::differenceDone(const MTPupdates_Difference &result) {
 	} break;
 	case mtpc_updates_differenceTooLong: {
 		const auto &d = result.c_updates_differenceTooLong();
-		setState(d.vpts().v, _updatesDate, _updatesQts, _updatesSeq);
+		const int32 serverPts = d.vpts().v;
+		const bool ptsChanged = (serverPts != _ptsWaiter.current());
+		setState(serverPts, _updatesDate, _updatesQts, _updatesSeq);
 
 		_ptsWaiter.setRequesting(false);
+		session().api().requestDialogs();
 
-		MTP_LOG(0, ("getDifference "
-			"{ good - differenceTooLong received, restarting }%1"
-			).arg(_session->mtp().isTestMode() ? " TESTMODE" : ""));
-		getDifference();
+		if (ptsChanged) {
+			MTP_LOG(0, ("getDifference "
+				"{ good - differenceTooLong received, restarting }%1"
+				).arg(_session->mtp().isTestMode() ? " TESTMODE" : ""));
+			getDifference();
+		} else {
+			MTP_LOG(0, ("getDifference "
+				"{ good - differenceTooLong with unchanged pts, stopped }%1"
+				).arg(_session->mtp().isTestMode() ? " TESTMODE" : ""));
+		}
 	} break;
 	};
 }

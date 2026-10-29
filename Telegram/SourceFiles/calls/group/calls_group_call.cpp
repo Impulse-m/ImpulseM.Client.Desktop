@@ -1152,9 +1152,7 @@ void GroupCall::setState(State state) {
 		break;
 	case State::Joined:
 	case State::Connecting:
-		if (!_checkJoinedTimer.isActive()) {
-			_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
-		}
+		armCheckJoined();
 		break;
 	}
 }
@@ -2830,6 +2828,7 @@ void GroupCall::setupOutgoingVideo() {
 			_cameraCapture->setState(tgcalls::VideoState::Inactive);
 		}
 		_isSharingCamera = nowActive;
+		armCheckJoined();
 		markEndpointActive({
 			VideoEndpointType::Camera,
 			joinAs(),
@@ -2898,6 +2897,7 @@ void GroupCall::setupOutgoingVideo() {
 			_screenCapture->setState(tgcalls::VideoState::Inactive);
 		}
 		_isSharingScreen = nowActive;
+		armCheckJoined();
 		markEndpointActive({
 			VideoEndpointType::Screen,
 			joinAs(),
@@ -3718,10 +3718,24 @@ void GroupCall::checkLastSpoke() {
 	}
 }
 
+bool GroupCall::shortPollNeeded() const {
+	return rtmp() || isSharingCamera() || isSharingScreen();
+}
+
+void GroupCall::armCheckJoined() {
+	if (!shortPollNeeded()
+		|| _checkJoinedTimer.isActive()
+		|| (state() != State::Connecting && state() != State::Joined)) {
+		return;
+	}
+	_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
+}
+
 void GroupCall::checkJoined() {
 	if ((state() != State::Connecting && state() != State::Joined)
 		|| !_id
-		|| !_joinState.ssrc) {
+		|| !_joinState.ssrc
+		|| !shortPollNeeded()) {
 		return;
 	}
 	auto sources = QVector<MTPint>(1, MTP_int(_joinState.ssrc));
@@ -3732,14 +3746,15 @@ void GroupCall::checkJoined() {
 		inputCall(),
 		MTP_vector<MTPint>(std::move(sources))
 	)).done([=](const MTPVector<MTPint> &result) {
+		if (!shortPollNeeded()) {
+			return;
+		}
 		if (!ranges::contains(result.v, MTP_int(_joinState.ssrc))) {
 			LOG(("Call Info: Rejoin after no my ssrc in checkGroupCall."));
 			_joinState.nextActionPending = true;
 			checkNextJoinAction();
 		} else {
-			if (state() == State::Connecting || state() == State::Joined) {
-				_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
-			}
+			armCheckJoined();
 			if (_screenJoinState.ssrc
 				&& !ranges::contains(
 					result.v,
@@ -3751,17 +3766,49 @@ void GroupCall::checkJoined() {
 			}
 		}
 	}).fail([=](const MTP::Error &error) {
-		if (state() != State::Connecting) {
-			// A failed poll of an established call is not an eviction,
-			// keep polling instead of tearing the call down.
-			LOG(("Call Info: Poll error '%1' in checkGroupCall, joined."
-				).arg(error.type()));
-			_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
+		if (!shortPollNeeded()) {
 			return;
 		}
-		LOG(("Call Info: Full rejoin after error '%1' in checkGroupCall."
-			).arg(error.type()));
-		startRejoin();
+		const auto type = error.type();
+		const auto conferenceLinkForm = conference()
+			&& (_conferenceJoinMessageId.bare
+				|| !_conferenceLinkSlug.isEmpty());
+		if (type == u"GROUPCALL_INVALID"_q && conferenceLinkForm) {
+			// The link was probably changed, load the call by its id.
+			LOG(("Call Info: Reload conference call after '%1'."
+				).arg(type));
+			_api.request(MTPphone_GetGroupCall(
+				inputCall(),
+				MTP_int(0)
+			)).done([=](const MTPphone_GroupCall &result) {
+				if (const auto raw = _sharedCall.get()) {
+					raw->processFullCall(result);
+				}
+				armCheckJoined();
+			}).fail([=](const MTP::Error &reloadError) {
+				if (reloadError.type() == u"GROUPCALL_INVALID"_q) {
+					// Can't join the group anymore.
+					hangup();
+				}
+			}).send();
+		} else if (error.code() == 400) {
+			// Android recreates the sources of this client here, the
+			// main source is the join source and the screen has its own.
+			LOG(("Call Info: Rejoin after error '%1' in checkGroupCall."
+				).arg(type));
+			_joinState.nextActionPending = true;
+			checkNextJoinAction();
+			if (_screenJoinState.ssrc && isSharingScreen()) {
+				_screenJoinState.nextActionPending = true;
+				checkNextJoinAction();
+			}
+		} else {
+			// The poll is not re-armed here: the next join or share
+			// start arms it again, so a persistent failure does not
+			// keep the poll running.
+			LOG(("Call Info: Poll error '%1' in checkGroupCall, stopped."
+				).arg(type));
+		}
 	}).send();
 }
 

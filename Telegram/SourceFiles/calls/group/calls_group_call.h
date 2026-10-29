@@ -622,6 +622,8 @@ private:
 
 	void checkGlobalShortcutAvailability();
 	void checkJoined();
+	[[nodiscard]] bool shortPollNeeded() const;
+	void armCheckJoined();
 	void checkFirstTimeJoined();
 	void notifyAboutAllowedToSpeak();
 

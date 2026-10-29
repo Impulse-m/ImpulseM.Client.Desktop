@@ -83,6 +83,10 @@ Source: "{#ReleasePath}\Updater.exe"; DestDir: "{app}"; Flags: ignoreversion
 #if MyBuildTarget != "winarm"
 Source: "{#ReleasePath}\{#ModulesFolder}\d3d\d3dcompiler_47.dll"; DestDir: "{app}\{#ModulesFolder}\d3d"; Flags: ignoreversion
 #endif
+#if MyBuildTarget == "win64"
+Source: "{#ReleasePath}\{#ModulesFolder}\livekit\*"; DestDir: "{app}\{#ModulesFolder}\livekit"; Flags: ignoreversion
+Source: "{#ReleasePath}\{#ModulesFolder}\xray\*"; DestDir: "{app}\{#ModulesFolder}\xray"; Flags: ignoreversion
+#endif
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

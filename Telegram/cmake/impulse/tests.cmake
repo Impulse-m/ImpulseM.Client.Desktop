@@ -17,6 +17,10 @@ PRIVATE
     mtproto/impulse/tests/impulse_test.h
     ${impulse_test_sources}
     ${impulse_core_sources}
+    # Qt-free runtime of the Xray core, tested with a fake invoker. Listed by
+    # name: the proxy glob also holds the libXray loader, which needs the
+    # Windows base headers that this target does not have.
+    core/impulse_proxy/xray_runtime.cpp
 )
 
 target_link_libraries(impulse_tests

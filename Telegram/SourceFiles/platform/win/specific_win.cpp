@@ -167,6 +167,29 @@ void DeleteMyModules() {
 	RemoveDirectory(modules.c_str());
 }
 
+[[nodiscard]] bool IsOwnAppLink(const QString &path) {
+	const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
+		CLSID_ShellLink);
+	if (!shellLink) {
+		return false;
+	}
+	const auto persistFile = shellLink.try_as<IPersistFile>();
+	if (!persistFile) {
+		return false;
+	}
+	if (FAILED(persistFile->Load(path.toStdWString().c_str(), STGM_READ))) {
+		return false;
+	}
+	WCHAR target[MAX_PATH];
+	if (FAILED(shellLink->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH))) {
+		return false;
+	}
+	const auto exe = QDir::toNativeSeparators(cExeDir() + cExeName());
+	const auto targetPath = QDir::toNativeSeparators(
+		QString::fromWCharArray(target));
+	return !targetPath.compare(exe, Qt::CaseInsensitive);
+}
+
 bool ManageAppLink(
 		bool create,
 		bool silent,
@@ -200,7 +223,9 @@ bool ManageAppLink(
 		+ AppFile.utf16()
 		+ u".lnk"_q;
 	if (!create) {
-		QFile::remove(lnk);
+		if (IsOwnAppLink(lnk)) {
+			QFile::remove(lnk);
+		}
 		return true;
 	}
 	const auto shellLink = base::WinRT::TryCreateInstance<IShellLink>(
@@ -248,7 +273,7 @@ QString psAppDataPath() {
 	if (GetEnvironmentVariable(L"APPDATA", wstrPath, maxFileLen)) {
 		QDir appData(QString::fromStdWString(std::wstring(wstrPath)));
 #ifdef OS_WIN_STORE
-		return appData.absolutePath() + u"/Telegram Desktop UWP/"_q;
+		return appData.absolutePath() + u"/ImpulseM Desktop UWP/"_q;
 #else // OS_WIN_STORE
 		return appData.absolutePath() + '/' + AppName.utf16() + '/';
 #endif // OS_WIN_STORE
@@ -329,10 +354,10 @@ void psDoFixPrevious() {
 		HRESULT userDesktopRes = SHGetFolderPath(0, CSIDL_DESKTOPDIRECTORY, 0, SHGFP_TYPE_CURRENT, userDesktopFolder);
 		HRESULT commonDesktopRes = SHGetFolderPath(0, CSIDL_COMMON_DESKTOPDIRECTORY, 0, SHGFP_TYPE_CURRENT, commonDesktopFolder);
 		if (SUCCEEDED(userDesktopRes)) {
-			userDesktopLnk = QString::fromWCharArray(userDesktopFolder) + "\\Telegram.lnk";
+			userDesktopLnk = QString::fromWCharArray(userDesktopFolder) + "\\" + AppFile.utf16() + ".lnk";
 		}
 		if (SUCCEEDED(commonDesktopRes)) {
-			commonDesktopLnk = QString::fromWCharArray(commonDesktopFolder) + "\\Telegram.lnk";
+			commonDesktopLnk = QString::fromWCharArray(commonDesktopFolder) + "\\" + AppFile.utf16() + ".lnk";
 		}
 		QFile userDesktopFile(userDesktopLnk), commonDesktopFile(commonDesktopLnk);
 		if (QFile::exists(userDesktopLnk) && QFile::exists(commonDesktopLnk) && userDesktopLnk != commonDesktopLnk) {
@@ -483,8 +508,8 @@ void AutostartToggle(bool enabled, Fn<void(bool)> done) {
 		silent,
 		FOLDERID_Startup,
 		L"-autostart",
-		L"Telegram autorun link.\n"
-		"You can disable autorun in Telegram settings.");
+		L"ImpulseM autorun link.\n"
+		"You can disable autorun in ImpulseM settings.");
 	if (done) {
 		done(enabled && success);
 	}
@@ -798,8 +823,8 @@ void psSendToMenu(bool send, bool silent) {
 		silent,
 		FOLDERID_SendTo,
 		L"--",
-		L"Telegram send to link.\n"
-		"You can disable send to menu item in Telegram settings.");
+		L"ImpulseM send to link.\n"
+		"You can disable send to menu item in ImpulseM settings.");
 }
 
 // Stub while we still support Windows 7.

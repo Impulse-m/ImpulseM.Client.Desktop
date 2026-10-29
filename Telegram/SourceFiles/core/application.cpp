@@ -1327,7 +1327,7 @@ bool Application::openInternalUrl(const QString &url, QVariant context) {
 }
 
 QString Application::changelogLink() const {
-	return u"https://telegramdesktop.github.io/tdesktop/changelog/"_q;
+	return u"https://github.com/Impulse-m/ImpulseM.Client.Desktop/releases"_q;
 }
 
 bool Application::openCustomUrl(
@@ -2107,8 +2107,8 @@ void Application::RegisterUrlScheme() {
 		.executable = Platform::ExecutablePathForShortcuts(),
 		.arguments = arguments,
 		.protocol = u"tg"_q,
-		.protocolName = u"Telegram Link"_q,
-		.shortAppName = u"tdesktop"_q,
+		.protocolName = u"ImpulseM Link"_q,
+		.shortAppName = u"impulsem"_q,
 		.longAppName = QCoreApplication::applicationName(),
 		.displayAppName = AppName.utf16(),
 		.displayAppDescription = AppName.utf16(),
@@ -2119,7 +2119,7 @@ void Application::RegisterUrlScheme() {
 		.arguments = arguments,
 		.protocol = u"tonsite"_q,
 		.protocolName = u"TonSite Link"_q,
-		.shortAppName = u"tdesktop"_q,
+		.shortAppName = u"impulsem"_q,
 		.longAppName = QCoreApplication::applicationName(),
 		.displayAppName = AppName.utf16(),
 		.displayAppDescription = AppName.utf16(),
@@ -2130,7 +2130,7 @@ void Application::RegisterUrlScheme() {
 		.arguments = arguments,
 		.protocol = u"ton"_q,
 		.protocolName = u"Ton Link"_q,
-		.shortAppName = u"tdesktop"_q,
+		.shortAppName = u"impulsem"_q,
 		.longAppName = QCoreApplication::applicationName(),
 		.displayAppName = AppName.utf16(),
 		.displayAppDescription = AppName.utf16(),

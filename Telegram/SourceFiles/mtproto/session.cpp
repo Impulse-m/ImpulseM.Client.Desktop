@@ -8,7 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/session.h"
 
 #include "mtproto/details/mtproto_dcenter.h"
-#include "mtproto/session_private.h"
+#include "mtproto/impulse/glue/impulse_connection.h"
+#include "mtproto/impulse/glue/impulse_session_private.h"
 #include "mtproto/mtproto_auth_key.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -216,7 +217,7 @@ void Session::watchDcOptionsChanges() {
 
 void Session::start() {
 	killConnection();
-	_private = new SessionPrivate(
+	_private = new Impulse::ImpulseSessionPrivate(
 		_instance,
 		_thread.get(),
 		_data,
@@ -357,6 +358,18 @@ void Session::cancel(mtpRequestId requestId, mtpMsgId msgId) {
 	if (msgId) {
 		QWriteLocker locker(_data->haveSentMutex());
 		_data->haveSentMap().remove(msgId);
+	}
+	if (requestId) {
+		// The request may already be on the account connection, which runs
+		// on this thread too.
+		if (Impulse::ImpulseConnection *const connection = _instance->impulse()) {
+			connection->cancel(requestId);
+		}
+		if (Impulse::ImpulseSessionPrivate *const captured = _private) {
+			InvokeQueued(captured, [=] {
+				captured->forgetRequest(requestId);
+			});
+		}
 	}
 }
 

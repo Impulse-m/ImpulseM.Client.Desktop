@@ -14,6 +14,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QTimer>
 
+namespace Impulse {
+
+class ImpulseSessionPrivate;
+
+} // namespace Impulse
+
 namespace MTP {
 
 class Instance;
@@ -199,7 +205,7 @@ private:
 	const std::shared_ptr<SessionData> _data;
 	const not_null<QThread*> _thread;
 
-	SessionPrivate *_private = nullptr;
+	Impulse::ImpulseSessionPrivate *_private = nullptr;
 
 	bool _killed = false;
 	bool _needToReceive = false;

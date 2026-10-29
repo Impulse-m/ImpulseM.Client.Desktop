@@ -403,8 +403,22 @@ void ImpulseSessionPrivate::dispatchDeclaration(
 }
 
 void ImpulseSessionPrivate::forgetRequest(mtpRequestId requestId) {
-	QMutexLocker locker(&tracking->mutex);
-	tracking->inFlight.remove(requestId);
+	{
+		QMutexLocker locker(&tracking->mutex);
+		tracking->inFlight.remove(requestId);
+	}
+
+	// The account connection is owned by the main thread, so the cancel of
+	// the call on the carrier is handed over to it. The hop is queued after
+	// any handover of this request, so the call is cut off once it is sent.
+	const not_null<MTP::Instance*> owner = instance;
+	const base::weak_qptr<ImpulseSessionPrivate> weak = base::make_weak(this);
+	crl::on_main(weak, [owner, requestId] {
+		ImpulseConnection *const connection = owner->impulse();
+		if (connection) {
+			connection->cancel(requestId);
+		}
+	});
 }
 
 void ImpulseSessionPrivate::publishState(

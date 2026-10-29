@@ -9375,5 +9375,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_impulse_proxy_adv_mss_error" = "Enter 0 or a number from 64 to 1460";
 "lng_impulse_proxy_adv_dns_error" = "Enter an https:// DoH URL or an IPv4 address";
 "lng_impulse_proxy_adv_url_error" = "Enter an https:// address";
+"lng_impulse_proxy_list_transport" = "Use proxy for Telegram traffic";
+"lng_impulse_proxy_list_check" = "Check servers";
+"lng_impulse_proxy_list_advanced" = "Advanced settings";
+"lng_impulse_proxy_list_empty" = "Add a vless:// link or a subscription URL to get servers.";
+"lng_impulse_proxy_list_subscription" = "Subscription";
+"lng_impulse_proxy_list_servers#one" = "{count} server";
+"lng_impulse_proxy_list_servers#other" = "{count} servers";
+"lng_impulse_proxy_list_refresh" = "Refresh subscription";
+"lng_impulse_proxy_list_add_title" = "Add server";
+"lng_impulse_proxy_list_add_placeholder" = "vless:// link or subscription URL";
+"lng_impulse_proxy_list_add_about" = "Paste one or more vless:// links, or the URL of a subscription.";
+"lng_impulse_proxy_list_added#one" = "{count} server added.";
+"lng_impulse_proxy_list_added#other" = "{count} servers added.";
+"lng_impulse_proxy_list_error_http" = "The subscription server answered with error {code}.";
+"lng_impulse_proxy_list_error_network" = "The subscription could not be downloaded.";
+"lng_impulse_proxy_list_error_invalid" = "The subscription is invalid or too large.";
+"lng_impulse_proxy_list_error_no_links" = "The subscription has no vless:// servers.";
 
 // Keys finished

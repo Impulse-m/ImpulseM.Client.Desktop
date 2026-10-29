@@ -9,9 +9,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "base/object_ptr.h"
+#include "base/weak_ptr.h"
 #include "core/core_settings_proxy.h"
+#include "core/impulse_proxy/proxy_ping.h"
+#include "core/impulse_proxy/proxy_service.h"
 #include "mtproto/connection_abstract.h"
 #include "mtproto/mtproto_proxy_data.h"
+
+#include <cstdint>
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace Ui {
 class Show;
@@ -34,7 +43,7 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
-class ProxiesBoxController {
+class ProxiesBoxController : public base::has_weak_ptr {
 public:
 	using ProxyData = MTP::ProxyData;
 	using Type = ProxyData::Type;
@@ -77,9 +86,29 @@ public:
 		bool supportsCalls = false;
 		bool web = false;
 		bool canOpenBrowser = false;
+		bool refreshable = false;
+		bool deletable = false;
 		ItemState state = ItemState::Checking;
 
 	};
+
+	// ImpulseM VLESS list. Every change is stored in the proxy state and
+	// applied through the proxy service; impulseChanges() fires after each one.
+	void setImpulseEnabled(bool enabled);
+	[[nodiscard]] bool setImpulseUseForTransport(bool enabled);
+	[[nodiscard]] bool setImpulseUseForCalls(bool enabled);
+	void importText(const QString &text);
+	void refreshImpulseSubscription(const std::string &id);
+	void deleteImpulseServer(const std::string &id);
+	void deleteImpulseSubscription(const std::string &id);
+	void selectImpulseServer(const std::string &id);
+	void shareImpulseServer(const std::string &id, bool qr);
+	void shareImpulseList();
+	void checkImpulseServers();
+	[[nodiscard]] bool impulseChecking() const;
+	[[nodiscard]] std::optional<std::int64_t> impulsePing(
+		const std::string &id) const;
+	[[nodiscard]] rpl::producer<> impulseChanges() const;
 
 	void deleteItem(int id);
 	void deleteItems();
@@ -126,6 +155,19 @@ private:
 	void share(const ProxyData &proxy, bool qr = false);
 	void saveDelayed();
 	void refreshChecker(Item &item);
+	void saveImpulse(Impulse::ProxyState::State state);
+	void addImpulseServers(std::vector<Impulse::ProxyState::Server> servers);
+	void fetchImpulseSubscription(
+		const std::string &url,
+		const std::string &id);
+	void applyImpulseSubscription(
+		const std::string &url,
+		const std::string &id,
+		Impulse::SubscriptionRefresh result);
+	void finishImpulseCheck(
+		const std::vector<Impulse::ProxyState::Server> &servers,
+		const std::vector<Impulse::Xray::PingResult> &results);
+	void showImpulseToast(const QString &text);
 
 	void replaceItemWith(
 		std::vector<Item>::iterator which,
@@ -141,6 +183,9 @@ private:
 	rpl::event_stream<ItemView> _views;
 	base::Timer _saveTimer;
 	rpl::event_stream<ProxyData::Settings> _proxySettingsChanges;
+	rpl::event_stream<> impulseChangeStream;
+	std::map<std::string, std::int64_t> impulsePingResults;
+	bool impulseCheckRunning = false;
 	std::shared_ptr<Ui::Show> _show;
 
 	ProxyData _lastSelectedProxy;

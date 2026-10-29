@@ -17,6 +17,7 @@
 #include "mtproto/impulse/glue/connection_state_host.h"
 #include "mtproto/impulse/glue/identity_manager.h"
 #include "mtproto/impulse/glue/lanes_observer.h"
+#include "mtproto/impulse/glue/login_flow.h"
 #include "mtproto/impulse/glue/media_fleet.h"
 #include "mtproto/impulse/glue/realtime.h"
 #include "mtproto/impulse/glue/rpc_carrier.h"
@@ -141,10 +142,12 @@ private:
 		RpcCarrierDone done;
 		RpcCarrierRequest deferred;
 		std::uint64_t carrierCallId = 0;
+		std::uint32_t methodId = 0;
 		bool needsLogin = false;
 		bool waitingLogin = false;
 		bool settled = false;
 		bool cancelled = false;
+		bool capturesLogin = false;
 	};
 
 	using SocketCallDone = std::function<void(
@@ -173,6 +176,9 @@ private:
 		std::int64_t timeoutMs,
 		SocketCallDone done);
 	void answerConnectionToken(std::uint64_t requestId);
+	void refreshIdentityLane();
+	void adoptLogin(const SessionTokens &pair);
+	void redeclare(std::uint32_t attempt);
 	void resolveUpdateToken(
 		std::uint64_t requestId,
 		CentrifugoTokenOutcome outcome,
@@ -198,6 +204,7 @@ private:
 	std::unique_ptr<TokenStore> identityStore;
 	std::unique_ptr<TokenManager> tokens;
 	std::unique_ptr<IdentityManager> identity;
+	std::unique_ptr<LoginFlow> loginFlow;
 	std::unique_ptr<Realtime> realtime;
 	std::unique_ptr<LanesObserver> lanes;
 	UpdatesHandler updatesHandler;
@@ -207,6 +214,8 @@ private:
 	LaneIdentity laneIdentity;
 	std::int64_t openedChannelId = 0;
 	std::optional<std::string> mediaEndpoint;
+	// The last declaration of the connection, sent again after a login.
+	std::vector<std::uint8_t> lastDeclaration;
 	std::int64_t userId = 0;
 	bool started = false;
 	bool mediaPublished = false;

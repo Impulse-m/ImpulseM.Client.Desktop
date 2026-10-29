@@ -9,6 +9,7 @@
 #include "mtproto/impulse/core/proxy_routing.h"
 #include "mtproto/impulse/core/transcoder.h"
 #include "mtproto/impulse/glue/carrier_errors.h"
+#include "mtproto/impulse/glue/login_flow.h"
 #include "mtproto/impulse/glue/media_pool_rust.h"
 #include "mtproto/impulse/glue/mtp_buffer_bridge.h"
 #include "settings.h"
@@ -31,6 +32,12 @@ namespace {
 // methods of the router, so the socket calls below name the socket themselves.
 const std::string kConnectionIdentityMethod = "connectionIdentity";
 const std::string kRefreshSessionMethod = "refreshSession";
+const std::string kInitConnectionMethod = "initConnection";
+
+// The declaration after a login is sent up to three times, one second apart,
+// as Android does when the update socket is not up yet.
+constexpr std::uint32_t kDeclarationAttempts = 3;
+constexpr std::int64_t kDeclarationRetryMs = 1000;
 
 // The code Android fails the login-only calls with when the login goes away.
 constexpr int kLoginLostErrorCode = -1000;
@@ -124,7 +131,7 @@ struct ConnectionCodec final {
 	Transcoder transcoder;
 };
 
-[[nodiscard]] const Transcoder *SharedTranscoder() {
+[[nodiscard]] const ConnectionCodec *SharedConnectionCodec() {
 	static const std::unique_ptr<ConnectionCodec> codec = []()
 			-> std::unique_ptr<ConnectionCodec> {
 		std::string error;
@@ -140,7 +147,29 @@ struct ConnectionCodec final {
 		}
 		return std::make_unique<ConnectionCodec>(std::move(*table));
 	}();
+	return codec.get();
+}
+
+[[nodiscard]] const Transcoder *SharedTranscoder() {
+	const ConnectionCodec *const codec = SharedConnectionCodec();
 	return codec ? &codec->transcoder : nullptr;
+}
+
+// The id of a mapped method, or zero when the method is not mapped. The reply
+// of a login is decoded with it.
+[[nodiscard]] std::uint32_t MappedMethodId(const std::string &method) {
+	const ConnectionCodec *const codec = SharedConnectionCodec();
+	if (!codec) {
+		return 0;
+	}
+	return codec->table.methodId(method).value_or(0);
+}
+
+// Request ids of the calls that the connection makes by itself. They are far
+// below the declarations of the sessions, which count from -1.
+[[nodiscard]] mtpRequestId NextConnectionRequestId() {
+	static std::atomic<mtpRequestId> counter = -(1 << 30);
+	return counter.fetch_sub(1) - 1;
 }
 
 // The timer of the carrier and of the token and identity managers: a task runs
@@ -315,6 +344,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 				mediaFleet->sessionChanged();
 			}
 		}
+		refreshIdentityLane();
 		releaseLoginWaiters();
 	});
 
@@ -341,6 +371,14 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 			});
 	}
 	lanes = makeLanes();
+
+	// The login capture reads the replies of the identity methods. A pair it
+	// reads is adopted on the main thread, like every other completion.
+	loginFlow = std::make_unique<LoginFlow>(
+		SharedTranscoder(),
+		[this](const SessionTokens &pair) {
+			adoptLogin(pair);
+		});
 
 	buildTransport(ReadRoute());
 }
@@ -496,7 +534,20 @@ void ImpulseConnection::send(
 	// A method outside the identity set needs a login, as Android waits for a
 	// request without FLAG_WITHOUT_LOGIN. route.signedIn is the state of the
 	// socket and is set at dispatch, so it is not read here.
-	pending->needsLogin = !isIdentitySocketMethod(request.route.method);
+	const std::string &method = request.route.method;
+	pending->needsLogin = !isIdentitySocketMethod(method);
+	// The replies of the login methods may carry the session pair. The
+	// declarations and the identity calls never do.
+	pending->capturesLogin = isIdentitySocketMethod(method)
+		&& method != kInitConnectionMethod
+		&& method != kConnectionIdentityMethod
+		&& method != kRefreshSessionMethod;
+	if (pending->capturesLogin) {
+		pending->methodId = MappedMethodId(method);
+	}
+	if (method == kInitConnectionMethod) {
+		lastDeclaration = request.data;
+	}
 	pendingRequests[requestId] = pending;
 
 	// A call that needs a login waits for it, as Android does. The waiting
@@ -594,6 +645,13 @@ void ImpulseConnection::settle(
 		const std::shared_ptr<PendingRequest> &pending,
 		RpcCarrierReply reply) {
 	pending->settled = true;
+	// The pair of a login is stored before the reply goes on, so the calls
+	// that follow find the session. A cancelled login may still have stored it.
+	if (pending->capturesLogin
+		&& reply.outcome.kind == CarrierOutcomeKind::Reply
+		&& loginFlow) {
+		static_cast<void>(loginFlow->onReply(pending->methodId, reply.data));
+	}
 	const std::map<mtpRequestId, std::shared_ptr<PendingRequest>>::iterator found
 		= pendingRequests.find(requestId);
 	if (found != pendingRequests.end() && found->second == pending) {
@@ -687,6 +745,8 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 	}
 	identity->obtain([this, requestId](IdentityObtainResult result) {
 		if (!result.token.empty()) {
+			// The identity lane of the minted identity is subscribed from now.
+			refreshIdentityLane();
 			resolveUpdateToken(requestId, CentrifugoTokenOutcome::Token, result.token);
 			return;
 		}
@@ -701,6 +761,66 @@ void ImpulseConnection::resolveUpdateToken(
 	if (updateClient) {
 		static_cast<void>(updateClient->resolveToken(requestId, outcome, token));
 	}
+}
+
+void ImpulseConnection::refreshIdentityLane() {
+	// QR login is answered on the identity lane of the connection identity.
+	// Without a usable identity the lane is dropped.
+	std::string identityId;
+	if (identity) {
+		identityId = IdentityLaneId(identity->current());
+	}
+	laneIdentity.identityId = identityId;
+	if (lanes) {
+		lanes->setIdentity(laneIdentity);
+	}
+}
+
+void ImpulseConnection::adoptLogin(const SessionTokens &pair) {
+	// The pair ends the connection identity: the session change discards it
+	// and retires the media pool.
+	tokens->onLoginTokens(pair);
+	refreshIdentityLane();
+
+	// The update socket connected with the identity token. It reconnects now
+	// and asks for the access token.
+	if (updateClient) {
+		static_cast<void>(updateClient->reconnectNow());
+	}
+
+	// The user is bound last. The calls that wait for the login are released
+	// here, and the account lanes follow the user.
+	bindUser(pair.userId);
+	releaseLoginWaiters();
+	redeclare(1);
+}
+
+void ImpulseConnection::redeclare(std::uint32_t attempt) {
+	if (lastDeclaration.empty()) {
+		return;
+	}
+	RpcCarrierRequest request;
+	request.route.method = kInitConnectionMethod;
+	request.data = lastDeclaration;
+	const base::weak_ptr<ImpulseConnection> weak = base::make_weak(this);
+	send(
+		NextConnectionRequestId(),
+		std::move(request),
+		[weak, attempt](RpcCarrierReply reply) {
+			if (reply.outcome.kind == CarrierOutcomeKind::Reply
+				|| attempt >= kDeclarationAttempts) {
+				return;
+			}
+			base::call_delayed(
+				static_cast<crl::time>(kDeclarationRetryMs),
+				weak,
+				[weak, attempt]() {
+					ImpulseConnection *const connection = weak.get();
+					if (connection) {
+						connection->redeclare(attempt + 1);
+					}
+				});
+		});
 }
 
 void ImpulseConnection::buildTransport(const TransportRoute &route) {

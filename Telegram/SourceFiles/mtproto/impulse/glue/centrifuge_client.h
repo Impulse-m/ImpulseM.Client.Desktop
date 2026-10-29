@@ -1,17 +1,20 @@
 // Centrifuge client of one fleet: the update socket, which carries RPC and
 // realtime, or the token-less pool socket. A facade over CentrifugoRust that
 // fixes the fleet rules (endpoint, subprotocol, token policy), turns the
-// client events into a connection state and forwards disconnects to the
-// connection state host. Owner thread only: the poster given to create() must
-// run its tasks on that thread.
+// client events into a connection state, forwards disconnects to the
+// connection state host and carries the channel subscriptions. Owner thread
+// only: the poster given to create() must run its tasks on that thread.
 #pragma once
 
 #include "mtproto/impulse/glue/centrifugo_rust.h"
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace Impulse {
 
@@ -29,10 +32,37 @@ enum class CentrifugeState {
 	Closed,
 };
 
+enum class CentrifugeSubscriptionKind {
+	Subscribing,
+	Subscribed,
+	Publication,
+	Unsubscribed,
+	Refused,
+};
+
+// One event of a channel subscription. Subscribing and Unsubscribed carry the
+// server code and reason in code and text. Subscribed carries the recovery
+// flags: recovered is the server flag, wasRecovering is cleared when the
+// stored position was dropped (code 2502); text is the stream epoch and
+// offset the stream offset. Publication carries data and offset. Refused
+// carries the server refusal in code and text; terminal tells whether the
+// channel is gone for good.
+struct CentrifugeSubscriptionEvent {
+	CentrifugeSubscriptionKind kind = CentrifugeSubscriptionKind::Subscribing;
+	std::uint32_t code = 0;
+	std::string text;
+	std::vector<std::uint8_t> data;
+	std::uint64_t offset = 0;
+	bool recovered = false;
+	bool wasRecovering = false;
+	bool terminal = false;
+};
+
 class CentrifugeClient {
 public:
 	using StateCallback = std::function<void(CentrifugeState state)>;
 	using ErrorCallback = std::function<void(std::uint32_t kind, const std::string &text)>;
+	using SubscriptionCallback = std::function<void(const CentrifugeSubscriptionEvent &event)>;
 
 private:
 	std::unique_ptr<CentrifugoRust> rust;
@@ -41,6 +71,8 @@ private:
 	StateCallback stateChanged;
 	ErrorCallback errorReported;
 	ConnectionStateHost *connectionState = nullptr;
+	std::map<std::string, SubscriptionCallback> subscriptionCallbacks;
+	std::set<std::string> positionDropped;
 
 public:
 	CentrifugeClient() = default;
@@ -92,8 +124,26 @@ public:
 
 	[[nodiscard]] std::int32_t cancelRpc(std::uint64_t callId);
 
+	// Subscribes to a channel with positioned and recoverable set and no
+	// subscription token. The callback gets the events of the channel until
+	// unsubscribe(), a terminal Unsubscribed or a terminal Refused event. The
+	// pool fleet has no subscriptions and refuses the call.
+	[[nodiscard]] std::int32_t subscribe(
+		const std::string &channel,
+		SubscriptionCallback onEvent);
+
+	[[nodiscard]] std::int32_t unsubscribe(const std::string &channel);
+
+	// Publishes into a channel through the update fleet. The completion runs
+	// once with the outcome. The pool fleet refuses the call.
+	[[nodiscard]] std::int32_t publish(
+		const std::string &channel,
+		const std::vector<std::uint8_t> &data,
+		CentrifugoRust::Completion done);
+
 private:
 	void onEvent(const CentrifugoEvent &event);
+	void onSubscriptionEvent(const std::string &channel, const CentrifugoEvent &event);
 	void setState(CentrifugeState next);
 };
 

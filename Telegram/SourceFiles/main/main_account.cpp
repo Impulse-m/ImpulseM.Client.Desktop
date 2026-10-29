@@ -143,9 +143,6 @@ void Account::watchProxyChanges() {
 void Account::watchSessionChanges() {
 	sessionChanges(
 	) | rpl::on_next([=](Session *session) {
-		if (_mtp) {
-			_mtp->setSignedIn(session != nullptr);
-		}
 		if (!session && _mtp) {
 			_mtp->setUserPhone(QString());
 		}

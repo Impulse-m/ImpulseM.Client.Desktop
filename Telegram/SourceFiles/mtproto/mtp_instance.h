@@ -76,9 +76,6 @@ public:
 	void setGoodProxyDomain(const QString &host, const QString &ip);
 	void suggestMainDcId(DcId mainDcId);
 	void setMainDcId(DcId mainDcId);
-	// Signed-out requests are limited to the identity set (see
-	// impulse/core/method_classes.h). Off until the account has a session.
-	void setSignedIn(bool value);
 	[[nodiscard]] DcId mainDcId() const;
 	[[nodiscard]] rpl::producer<DcId> mainDcIdValue() const;
 	[[nodiscard]] QString systemLangCode() const;

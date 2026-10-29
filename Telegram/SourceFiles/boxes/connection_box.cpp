@@ -2142,25 +2142,28 @@ void ProxiesBoxController::updateView(const Item &item) {
 	const auto supportsShare = ProxyDataIsShareable(item.data);
 	const auto supportsCalls = item.data.supportsCalls();
 	_views.fire({
-		item.id,
-		type,
-		((item.data.type == Type::Web)
+		.id = item.id,
+		.type = type,
+		.host = ((item.data.type == Type::Web)
 			? item.data.webAddress()
 			: item.data.host),
-		item.data.port,
-		item.ping,
-		!deleted && selected,
-		deleted,
-		!deleted && supportsShare,
-		supportsCalls,
-		item.data.type == Type::Web,
-		!deleted
+		.port = item.data.port,
+		.ping = item.ping,
+		.selected = !deleted && selected,
+		.deleted = deleted,
+		.supportsShare = !deleted && supportsShare,
+		.supportsCalls = supportsCalls,
+		.web = item.data.type == Type::Web,
+		.canOpenBrowser = !deleted
 			&& selected
 			&& _settings.isEnabled()
 			&& item.data.type == Type::Web
 			&& (state == ItemState::WaitingForBrowser
 				|| state == ItemState::Unavailable),
-		state,
+		.refreshable = false,
+		.deletable = true,
+		.editable = true,
+		.state = state,
 	});
 }
 

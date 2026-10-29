@@ -103,7 +103,7 @@ private:
 	// SessionData, or puts the request back for a retry. The start epoch is
 	// the proxy epoch when the request was handed to the connection.
 	static void settleRequest(
-		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const base::weak_qptr<ImpulseSessionPrivate> &weak,
 		const std::shared_ptr<Tracking> &shared,
 		const std::shared_ptr<MTP::details::SessionData> &data,
 		mtpRequestId requestId,
@@ -115,7 +115,7 @@ private:
 	// A counted retry raises the retry timeout when it fires. An uncounted
 	// retry (a proxy-change failure) leaves it as it is.
 	static void scheduleRetry(
-		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const base::weak_qptr<ImpulseSessionPrivate> &weak,
 		const std::shared_ptr<Tracking> &shared,
 		const std::shared_ptr<MTP::details::SessionData> &data,
 		std::uint64_t generation,

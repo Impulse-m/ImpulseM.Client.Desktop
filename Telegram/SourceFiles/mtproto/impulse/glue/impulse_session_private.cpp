@@ -298,7 +298,7 @@ ImpulseSessionPrivate::Dispatch ImpulseSessionPrivate::dispatch(
 	const std::shared_ptr<Tracking> shared = tracking;
 	const std::shared_ptr<MTP::details::SessionData> data = sessionData;
 	const not_null<MTP::Instance*> owner = instance;
-	const base::weak_ptr<ImpulseSessionPrivate> weak = base::make_weak(this);
+	const base::weak_qptr<ImpulseSessionPrivate> weak = base::make_weak(this);
 	const std::uint32_t methodId = encoded.methodId;
 	const SerializedRequest retained = request;
 
@@ -388,7 +388,7 @@ void ImpulseSessionPrivate::dispatchDeclaration(
 	};
 
 	const not_null<MTP::Instance*> owner = instance;
-	const base::weak_ptr<ImpulseSessionPrivate> weak = base::make_weak(this);
+	const base::weak_qptr<ImpulseSessionPrivate> weak = base::make_weak(this);
 	crl::on_main(weak, [
 		owner,
 		requestId,
@@ -422,7 +422,7 @@ void ImpulseSessionPrivate::publishState(
 }
 
 void ImpulseSessionPrivate::settleRequest(
-		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const base::weak_qptr<ImpulseSessionPrivate> &weak,
 		const std::shared_ptr<Tracking> &shared,
 		const std::shared_ptr<MTP::details::SessionData> &data,
 		mtpRequestId requestId,
@@ -492,7 +492,7 @@ void ImpulseSessionPrivate::settleRequest(
 }
 
 void ImpulseSessionPrivate::scheduleRetry(
-		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const base::weak_qptr<ImpulseSessionPrivate> &weak,
 		const std::shared_ptr<Tracking> &shared,
 		const std::shared_ptr<MTP::details::SessionData> &data,
 		std::uint64_t generation,

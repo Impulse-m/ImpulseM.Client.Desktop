@@ -68,6 +68,8 @@ struct CentrifugoRustState : std::enable_shared_from_this<CentrifugoRustState> {
 	CentrifugoRust::EventCallback eventCallback;
 	CentrifugoRust::TokenCallback tokenCallback;
 	std::map<std::string, CentrifugoRust::EventCallback> subscriptionCallbacks;
+	// The native pool handles of this client, by the pool object that owns each.
+	std::map<const CentrifugoRustPool *, impulse_centrifugo_pool_t *> pools;
 	impulse_centrifugo_client_t *client = nullptr;
 	bool alive = true;
 };
@@ -220,6 +222,11 @@ CentrifugoRust::~CentrifugoRust() {
 		return;
 	}
 	state->alive = false;
+	// The pools run on this client's runtime, so they close before it.
+	for (const std::pair<const CentrifugoRustPool *, impulse_centrifugo_pool_t *> &entry : state->pools) {
+		impulse_centrifugo_pool_destroy(entry.second);
+	}
+	state->pools.clear();
 	if (state->client) {
 		// Waits for the runtime to stop; no callback fires after this returns.
 		impulse_centrifugo_client_destroy(state->client);
@@ -438,6 +445,137 @@ std::int32_t CentrifugoRust::unsubscribe(const std::string &channel) {
 
 bool CentrifugoRust::ready() const {
 	return state != nullptr && state->client != nullptr;
+}
+
+namespace {
+
+// The native handle of pool in state, or null when the pool is not open.
+impulse_centrifugo_pool_t *findPoolHandle(
+		const std::shared_ptr<CentrifugoRustState> &state,
+		const CentrifugoRustPool *pool) {
+	if (!state) {
+		return nullptr;
+	}
+	const std::map<const CentrifugoRustPool *, impulse_centrifugo_pool_t *>::const_iterator found
+		= state->pools.find(pool);
+	if (found == state->pools.end()) {
+		return nullptr;
+	}
+	return found->second;
+}
+
+} // namespace
+
+CentrifugoRustPool::~CentrifugoRustPool() {
+	close();
+}
+
+std::int32_t CentrifugoRustPool::create(
+		const CentrifugoRust &client,
+		const CentrifugoPoolConfig &config) {
+	if (ready()) {
+		return kCentrifugoStatusInvalidArgument;
+	}
+	if (!client.ready()) {
+		return kCentrifugoStatusNotInitialized;
+	}
+
+	std::vector<impulse_centrifugo_endpoint_t> endpoints;
+	endpoints.reserve(config.endpoints.size());
+	for (const CentrifugoEndpoint &endpoint : config.endpoints) {
+		impulse_centrifugo_endpoint_t raw{};
+		raw.key = endpoint.key.c_str();
+		raw.url = endpoint.url.c_str();
+		endpoints.push_back(raw);
+	}
+	std::vector<impulse_centrifugo_header_t> headers = toCHeaders(config.headers);
+
+	impulse_centrifugo_pool_config_t raw{};
+	raw.cfg_size = sizeof(impulse_centrifugo_pool_config_t);
+	raw.endpoints = endpoints.empty() ? nullptr : endpoints.data();
+	raw.endpoint_count = endpoints.size();
+	raw.headers = headers.empty() ? nullptr : headers.data();
+	raw.header_count = headers.size();
+	raw.name = nullptr;
+	raw.version = nullptr;
+	raw.timeout_ms = config.timeoutMs;
+	raw.min_reconnect_ms = config.minReconnectMs;
+	raw.max_reconnect_ms = config.maxReconnectMs;
+	raw.max_server_ping_delay_ms = config.maxServerPingDelayMs;
+	raw.max_connections_per_endpoint = config.maxConnectionsPerEndpoint;
+	raw.max_inflight_per_connection = config.maxInflightPerConnection;
+	raw.max_queued = config.maxQueued;
+	raw.idle_timeout_ms = config.idleTimeoutMs;
+	raw.retries = config.retries;
+	raw.token_from = toFlag(config.tokenFrom);
+
+	impulse_centrifugo_pool_t *handle = nullptr;
+	const std::int32_t status = impulse_centrifugo_pool_create(client.state->client, &raw, &handle);
+	if (status != kCentrifugoStatusOk) {
+		return status;
+	}
+	state = client.state;
+	state->pools.emplace(this, handle);
+	return kCentrifugoStatusOk;
+}
+
+std::int32_t CentrifugoRustPool::rpc(
+		const std::string &key,
+		const CentrifugoRpcRequest &request,
+		Completion done,
+		std::uint64_t *callId) {
+	impulse_centrifugo_pool_t *handle = findPoolHandle(state, this);
+	if (!handle) {
+		return kCentrifugoStatusNotInitialized;
+	}
+
+	std::vector<impulse_centrifugo_header_t> headers = toCHeaders(request.headers);
+
+	impulse_centrifugo_rpc_request_t raw{};
+	raw.method = request.method.c_str();
+	raw.data = request.data.data();
+	raw.data_len = request.data.size();
+	raw.headers = headers.empty() ? nullptr : headers.data();
+	raw.header_count = headers.size();
+	raw.timeout_ms = request.timeoutMs;
+	raw.on_done = &onCompletion;
+
+	CompletionContext *context = new CompletionContext();
+	context->state = state;
+	context->done = std::move(done);
+	raw.user = context;
+
+	const std::int32_t status = impulse_centrifugo_pool_rpc(handle, key.c_str(), &raw, callId);
+	if (status != kCentrifugoStatusOk) {
+		// A call that did not start never runs its completion.
+		delete context;
+	}
+	return status;
+}
+
+std::int32_t CentrifugoRustPool::cancelRpc(std::uint64_t callId) {
+	impulse_centrifugo_pool_t *handle = findPoolHandle(state, this);
+	if (!handle) {
+		return kCentrifugoStatusNotInitialized;
+	}
+	return impulse_centrifugo_pool_rpc_cancel(handle, callId);
+}
+
+void CentrifugoRustPool::close() {
+	if (!state) {
+		return;
+	}
+	const std::map<const CentrifugoRustPool *, impulse_centrifugo_pool_t *>::iterator found
+		= state->pools.find(this);
+	if (found != state->pools.end()) {
+		impulse_centrifugo_pool_destroy(found->second);
+		state->pools.erase(found);
+	}
+	state.reset();
+}
+
+bool CentrifugoRustPool::ready() const {
+	return findPoolHandle(state, this) != nullptr;
 }
 
 } // namespace Impulse

@@ -126,7 +126,32 @@ struct CentrifugoSubscribeRequest {
 	std::uint64_t sinceOffset = 0;
 };
 
+// One endpoint of a pool: the key that calls name, and one URL of that key.
+// Repeat the key for more URLs.
+struct CentrifugoEndpoint {
+	std::string key;
+	std::string url;
+};
+
+// The fields of the pool configuration. Zero numeric fields select the Rust
+// defaults; a zero timeoutMs is 30 s.
+struct CentrifugoPoolConfig {
+	std::vector<CentrifugoEndpoint> endpoints;
+	std::vector<CentrifugoHeader> headers;
+	std::uint32_t timeoutMs = 0;
+	std::uint32_t minReconnectMs = 0;
+	std::uint32_t maxReconnectMs = 0;
+	std::uint32_t maxServerPingDelayMs = 0;
+	std::uint32_t maxConnectionsPerEndpoint = 0;
+	std::uint32_t maxInflightPerConnection = 0;
+	std::uint32_t maxQueued = 0;
+	std::uint32_t idleTimeoutMs = 0;
+	std::uint32_t retries = 0;
+	bool tokenFrom = false;
+};
+
 struct CentrifugoRustState;
+class CentrifugoRustPool;
 
 class CentrifugoRust {
 public:
@@ -197,6 +222,52 @@ public:
 
 	// Events of the channel stop reaching its callback once this returns.
 	[[nodiscard]] std::int32_t unsubscribe(const std::string &channel);
+
+private:
+	friend class CentrifugoRustPool;
+
+	[[nodiscard]] bool ready() const;
+};
+
+// An rpc pool over a CentrifugoRust client. The pool shares the client's state,
+// so its completions run through the client's poster. The client closes every
+// pool it still holds when it is destroyed, before it destroys its own handle,
+// so no pool outlives its client. Owner thread only.
+class CentrifugoRustPool {
+public:
+	using Completion = CentrifugoRust::Completion;
+
+private:
+	std::shared_ptr<CentrifugoRustState> state;
+
+public:
+	CentrifugoRustPool() = default;
+	CentrifugoRustPool(const CentrifugoRustPool &other) = delete;
+	CentrifugoRustPool &operator=(const CentrifugoRustPool &other) = delete;
+	~CentrifugoRustPool();
+
+	// Builds the pool over client. Fails when the client is not created or the
+	// pool already exists.
+	[[nodiscard]] std::int32_t create(
+		const CentrifugoRust &client,
+		const CentrifugoPoolConfig &config);
+
+	// Starts a call on the endpoint key. The completion runs once with the
+	// outcome when the call started. If the call cannot start, the completion
+	// never runs and the status is returned. callId, when not null, receives the
+	// id for cancelRpc().
+	[[nodiscard]] std::int32_t rpc(
+		const std::string &key,
+		const CentrifugoRpcRequest &request,
+		Completion done,
+		std::uint64_t *callId = nullptr);
+
+	[[nodiscard]] std::int32_t cancelRpc(std::uint64_t callId);
+
+	// Closes the pool and frees its handle. Calls waiting or in flight fail with
+	// their statuses, and their completions run later through the poster. Safe
+	// to call more than once.
+	void close();
 
 private:
 	[[nodiscard]] bool ready() const;

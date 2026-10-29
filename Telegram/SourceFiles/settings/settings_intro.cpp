@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "boxes/abstract_box.h"
 #include "window/window_controller.h"
+#include "core/impulse_features.h"
 #include "styles/style_settings.h"
 #include "styles/style_layers.h"
 #include "styles/style_info.h"
@@ -102,16 +103,19 @@ object_ptr<Ui::RpWidget> CreateIntroSettings(
 		Ui::AddSkip(result);
 	}
 
-	Ui::AddDivider(result);
-	Ui::AddSkip(result);
+	// Hidden with the help section of the main settings, as on Android.
+	if (ImpulseFeatures::HELP_SECTION) {
+		Ui::AddDivider(result);
+		Ui::AddSkip(result);
 
-	AddButtonWithIcon(
-		result,
-		tr::lng_settings_faq(),
-		st::settingsButtonNoIcon
-	)->addClickHandler([] {
-		OpenFaq(nullptr);
-	});
+		AddButtonWithIcon(
+			result,
+			tr::lng_settings_faq(),
+			st::settingsButtonNoIcon
+		)->addClickHandler([] {
+			OpenFaq(nullptr);
+		});
+	}
 
 	return result;
 }

@@ -1429,6 +1429,23 @@ win64:
     del livekit_ffi.zip
 """)
 
+# Xray core for the proxy: the prebuilt Windows x64 archive of the pinned
+# libXray release, checked against its sha256 before it is unpacked. The
+# archive holds libXray.dll (CGoInvoke and CGoFree), loaded in-process by
+# LoadLibraryExW. The stage directory is Libraries/win64/libxray; the DLL is
+# copied to Libraries/win64/xray.
+stage('libxray', """
+win64:
+    powershell -Command "iwr -OutFile ./libxray.zip https://github.com/XTLS/libXray/releases/download/v26.9.30/libxray-windows-x64.zip"
+    powershell -Command "if ((Get-FileHash -Algorithm SHA256 -Path ./libxray.zip).Hash.ToLower() -ne '8981854173f0b590a51c902a2664443aaf9ea95f6be5466b82daa3ee795f5cc0') { exit 1 }"
+    powershell -Command "Expand-Archive -Force -Path ./libxray.zip -DestinationPath ./libxray"
+    if not exist libxray\\libxray-windows-x64\\libXray.dll exit /b 1
+    if not exist ..\\xray mkdir ..\\xray
+    copy /Y libxray\\libxray-windows-x64\\libXray.dll ..\\xray\\ >nul
+    if not exist ..\\xray\\libXray.dll exit /b 1
+    del libxray.zip
+""")
+
 stage('openal-soft', """
     git clone https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft

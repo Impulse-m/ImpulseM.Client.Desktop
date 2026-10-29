@@ -100,7 +100,8 @@ private:
 		int32 newState);
 
 	// Runs on the main thread. Settles one carrier reply of a request into
-	// SessionData, or puts the request back for a retry.
+	// SessionData, or puts the request back for a retry. The start epoch is
+	// the proxy epoch when the request was handed to the connection.
 	static void settleRequest(
 		const base::weak_ptr<ImpulseSessionPrivate> &weak,
 		const std::shared_ptr<Tracking> &shared,
@@ -108,12 +109,19 @@ private:
 		mtpRequestId requestId,
 		std::uint32_t methodId,
 		const MTP::details::SerializedRequest &request,
+		std::uint64_t startEpoch,
 		RpcCarrierReply reply);
+
+	// A counted retry raises the retry timeout when it fires. An uncounted
+	// retry (a proxy-change failure) leaves it as it is.
 	static void scheduleRetry(
 		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const std::shared_ptr<Tracking> &shared,
+		const std::shared_ptr<MTP::details::SessionData> &data,
 		std::uint64_t generation,
-		crl::time delayMs);
-	void retryByTimer(std::uint64_t generation);
+		crl::time delayMs,
+		bool counted);
+	void retryByTimer(std::uint64_t generation, bool counted);
 
 	const not_null<MTP::Instance*> instance;
 	const MTP::ShiftedDcId shiftedDcId = 0;

@@ -35,6 +35,10 @@ using RequestMap = base::flat_map<mtpRequestId, SerializedRequest>;
 // The rpc_error object of the TL schema: error_code and error_message.
 constexpr std::int32_t kRpcErrorConstructor = 0x2144ca19;
 
+// The local permanent failure of a carrier error with a negative code.
+constexpr std::string_view kLocalFailureType = "CLIENT_LOCAL_FAILURE";
+constexpr std::string_view kLocalFailureDescription = "The request failed locally.";
+
 // The mapping of the layer 232 schema, next to the executable.
 [[nodiscard]] std::string MappingFilePath() {
 	return (cExeDir() + "impulse/tl-proto-232.json.gz").toStdString();
@@ -152,6 +156,24 @@ struct RequestCodec final {
 	}
 }
 
+// The rpc_error of a carrier failure that reaches the session. Instance retries
+// every negative code and every code from 500 up forever, so a negative code
+// becomes the local permanent class. Only a local fault of the connection
+// produces one (the login went away), and it is never a server answer.
+[[nodiscard]] mtpBuffer OutcomeErrorBuffer(const RpcError &error) {
+	if (error.code >= 0) {
+		return ErrorBuffer(error.code, error.text);
+	}
+	const RpcErrorPayload payload = MakeClientError(
+		kLocalFailureType,
+		error.text.empty()
+			? kLocalFailureDescription
+			: std::string_view(error.text));
+	return ErrorBuffer(payload.code, RpcErrorText(
+		payload.type,
+		payload.description));
+}
+
 } // namespace
 
 ImpulseSessionPrivate::ImpulseSessionPrivate(
@@ -199,7 +221,10 @@ void ImpulseSessionPrivate::restartNow() {
 }
 
 void ImpulseSessionPrivate::sendPingForce() {
-	// The sockets keep their own liveness through the client configuration.
+	// The layer 232 mapping has no ping method, so no ping is sent on the wire.
+	// Liveness is the socket's own ping and pong frames (the endpoints of
+	// core/endpoints request cf_ws_frame_ping_pong), which replace the session
+	// ping timers of session_private.cpp:41-42.
 }
 
 void ImpulseSessionPrivate::tryToSend() {
@@ -277,34 +302,17 @@ ImpulseSessionPrivate::Dispatch ImpulseSessionPrivate::dispatch(
 	const std::uint32_t methodId = encoded.methodId;
 	const SerializedRequest retained = request;
 
-	// The completion runs on the main thread, once the carrier has settled.
-	const RpcCarrierDone done = [
-		weak,
-		shared,
-		data,
-		requestId,
-		methodId,
-		retained
-	](RpcCarrierReply reply) {
-		ImpulseSessionPrivate::settleRequest(
-			weak,
-			shared,
-			data,
-			requestId,
-			methodId,
-			retained,
-			std::move(reply));
-	};
-
 	// The handover runs on the main thread. Once the session is gone it does
 	// nothing, and the request stays queued in SessionData for the next one.
 	crl::on_main(weak, [
 		owner,
+		weak,
 		data,
 		shared,
 		requestId,
-		carrierRequest = std::move(carrierRequest),
-		done
+		methodId,
+		retained,
+		carrierRequest = std::move(carrierRequest)
 	]() mutable {
 		{
 			QMutexLocker locker(&shared->mutex);
@@ -323,6 +331,32 @@ ImpulseSessionPrivate::Dispatch ImpulseSessionPrivate::dispatch(
 			QWriteLocker locker(data->toSendMutex());
 			data->toSendMap().remove(requestId);
 		}
+
+		// The epoch is read as the request starts on the main thread. A
+		// failure after a proxy change that advanced it is a proxy-change
+		// failure, and it is retried without counting toward the budget.
+		const std::uint64_t startEpoch = ImpulseConnection::proxyEpoch();
+
+		// The completion runs on the main thread, once the carrier has settled.
+		const RpcCarrierDone done = [
+			weak,
+			shared,
+			data,
+			requestId,
+			methodId,
+			retained,
+			startEpoch
+		](RpcCarrierReply reply) {
+			ImpulseSessionPrivate::settleRequest(
+				weak,
+				shared,
+				data,
+				requestId,
+				methodId,
+				retained,
+				startEpoch,
+				std::move(reply));
+		};
 		connection->send(requestId, std::move(carrierRequest), done);
 	});
 	return Dispatch::Sent;
@@ -394,6 +428,7 @@ void ImpulseSessionPrivate::settleRequest(
 		mtpRequestId requestId,
 		std::uint32_t methodId,
 		const SerializedRequest &request,
+		std::uint64_t startEpoch,
 		RpcCarrierReply reply) {
 	{
 		QMutexLocker locker(&shared->mutex);
@@ -407,6 +442,10 @@ void ImpulseSessionPrivate::settleRequest(
 	if (reply.outcome.kind == CarrierOutcomeKind::NetworkFailure) {
 		// A network failure is not an answer of the server. The request goes
 		// back to the queue and is sent again by the retry of the session.
+		// A failure after a proxy change that started before it is a
+		// proxy-change failure: it does not count toward the retry budget.
+		const bool proxyChangeFailure
+			= ImpulseConnection::proxyEpoch() != startEpoch;
 		{
 			QWriteLocker locker(data->toSendMutex());
 			data->toSendMap().emplace(requestId, request);
@@ -419,7 +458,13 @@ void ImpulseSessionPrivate::settleRequest(
 			delayMs = shared->retryTimeout;
 		}
 		publishState(shared, data, static_cast<int32>(-delayMs));
-		scheduleRetry(weak, generation, delayMs);
+		scheduleRetry(
+			weak,
+			shared,
+			data,
+			generation,
+			delayMs,
+			!proxyChangeFailure);
 		return;
 	}
 
@@ -434,9 +479,7 @@ void ImpulseSessionPrivate::settleRequest(
 	if (reply.outcome.kind == CarrierOutcomeKind::Reply) {
 		response.reply = ResultBuffer(methodId, reply.data);
 	} else {
-		response.reply = ErrorBuffer(
-			reply.outcome.error.code,
-			reply.outcome.error.text);
+		response.reply = OutcomeErrorBuffer(reply.outcome.error);
 	}
 	response.outerMsgId = OuterMsgIdFromServerTime(
 		static_cast<std::uint64_t>(base::unixtime::now()) * 1000);
@@ -450,29 +493,46 @@ void ImpulseSessionPrivate::settleRequest(
 
 void ImpulseSessionPrivate::scheduleRetry(
 		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const std::shared_ptr<Tracking> &shared,
+		const std::shared_ptr<MTP::details::SessionData> &data,
 		std::uint64_t generation,
-		crl::time delayMs) {
-	// The timer fires on the main thread; the retry itself runs on the session
-	// thread, which owns this object and sends its requests. A queued call to
-	// an object that is gone is dropped by Qt.
-	base::call_delayed(delayMs, weak, [weak, generation] {
+		crl::time delayMs,
+		bool counted) {
+	// The timer fires on the main thread. While this session lives, the retry
+	// runs on its session thread, which owns it and sends its requests. When
+	// the session was replaced or killed, the requests stay in SessionData, and
+	// the data asks the session of the account to resume and send them.
+	base::call_delayed(delayMs, [weak, shared, data, generation, counted] {
+		{
+			QMutexLocker locker(&shared->mutex);
+			if (shared->retryGeneration != generation) {
+				// A later reply or failure has replaced this retry.
+				return;
+			}
+		}
 		ImpulseSessionPrivate *const self = weak.get();
 		if (self) {
-			InvokeQueued(self, [self, generation] {
-				self->retryByTimer(generation);
+			InvokeQueued(self, [self, generation, counted] {
+				self->retryByTimer(generation, counted);
 			});
+		} else {
+			data->queueNeedToResumeAndSend();
 		}
 	});
 }
 
-void ImpulseSessionPrivate::retryByTimer(std::uint64_t generation) {
+void ImpulseSessionPrivate::retryByTimer(
+		std::uint64_t generation,
+		bool counted) {
 	{
 		QMutexLocker locker(&tracking->mutex);
 		if (tracking->retryGeneration != generation) {
 			// A later reply or failure has replaced this retry.
 			return;
 		}
-		tracking->retryTimeout = NextRetryTimeout(tracking->retryTimeout);
+		if (counted) {
+			tracking->retryTimeout = NextRetryTimeout(tracking->retryTimeout);
+		}
 	}
 	publishState(tracking, sessionData, MTP::ConnectingState);
 	tryToSend();

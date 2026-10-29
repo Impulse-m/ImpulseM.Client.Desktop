@@ -2113,7 +2113,7 @@ win:
     git clone https://github.com/Impulse-m/ImpulseM.Centrifugo.Client.Rust.git centrifugo_rust
     cd centrifugo_rust
     git checkout """ + centrifugoRevision + """
-    git rev-parse HEAD | findstr /x """ + centrifugoRevision + """ >nul || exit /b 1
+    git rev-parse HEAD | findstr /b /c:""" + centrifugoRevision + """ >nul || exit /b 1
 """)
 
 stage('tdesktop_rust', """

@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/network_reachability.h"
 #include "test/test_rpc_retry.h"
+#include "mtproto/impulse/core/method_classes.h"
 
 namespace MTP {
 namespace {
@@ -37,6 +38,82 @@ constexpr auto kConfigBecomesOldForBlockedIn = 8 * crl::time(1000);
 using namespace details;
 
 std::atomic<int> GlobalAtomicRequestId = 0;
+
+struct GatedMethod {
+	std::uint32_t constructorId = 0;
+	std::string_view name;
+};
+
+// Constructor ids of the methods that the signed-out gate can name. Any other
+// constructor is passed to the router with an empty name.
+constexpr GatedMethod kGatedMethods[] = {
+	{ uint32(mtpc_auth_sendCode), "auth.sendCode" },
+	{ uint32(mtpc_auth_cancelCode), "auth.cancelCode" },
+	{ uint32(mtpc_auth_signIn), "auth.signIn" },
+	{ uint32(mtpc_auth_signUp), "auth.signUp" },
+	{ uint32(mtpc_auth_requestFirebaseSms), "auth.requestFirebaseSms" },
+	{ uint32(mtpc_auth_resetLoginEmail), "auth.resetLoginEmail" },
+	{ uint32(mtpc_auth_reportMissingCode), "auth.reportMissingCode" },
+	{ uint32(mtpc_auth_checkPaidAuth), "auth.checkPaidAuth" },
+	{ uint32(mtpc_auth_importAuthorization), "auth.importAuthorization" },
+	{ uint32(mtpc_auth_importBotAuthorization), "auth.importBotAuthorization" },
+	{
+		uint32(mtpc_auth_importWebTokenAuthorization),
+		"auth.importWebTokenAuthorization",
+	},
+	{ uint32(mtpc_auth_exportLoginToken), "auth.exportLoginToken" },
+	{ uint32(mtpc_auth_importLoginToken), "auth.importLoginToken" },
+	{ uint32(mtpc_auth_initPasskeyLogin), "auth.initPasskeyLogin" },
+	{ uint32(mtpc_auth_finishPasskeyLogin), "auth.finishPasskeyLogin" },
+	{ uint32(mtpc_auth_resendCode), "auth.resendCode" },
+	{
+		uint32(mtpc_account_sendVerifyEmailCode),
+		"account.sendVerifyEmailCode",
+	},
+	{ uint32(mtpc_account_verifyEmail), "account.verifyEmail" },
+	{ uint32(mtpc_auth_checkPassword), "auth.checkPassword" },
+	{
+		uint32(mtpc_auth_requestPasswordRecovery),
+		"auth.requestPasswordRecovery",
+	},
+	{ uint32(mtpc_auth_recoverPassword), "auth.recoverPassword" },
+	{
+		uint32(mtpc_auth_checkRecoveryPassword),
+		"auth.checkRecoveryPassword",
+	},
+	{ uint32(mtpc_account_getPassword), "account.getPassword" },
+	{ uint32(mtpc_help_getConfig), "help.getConfig" },
+	{ uint32(mtpc_help_getAppConfig), "help.getAppConfig" },
+	{ uint32(mtpc_help_getNearestDc), "help.getNearestDc" },
+	{ uint32(mtpc_help_getCountriesList), "help.getCountriesList" },
+	{ uint32(mtpc_help_getDeepLinkInfo), "help.getDeepLinkInfo" },
+	{ uint32(mtpc_help_saveAppLog), "help.saveAppLog" },
+	{ uint32(mtpc_langpack_getLangPack), "langpack.getLangPack" },
+	{ uint32(mtpc_langpack_getStrings), "langpack.getStrings" },
+	{ uint32(mtpc_langpack_getDifference), "langpack.getDifference" },
+	{ uint32(mtpc_langpack_getLanguage), "langpack.getLanguage" },
+	{ uint32(mtpc_langpack_getLanguages), "langpack.getLanguages" },
+	{ uint32(mtpc_initConnection), "initConnection" },
+	{ uint32(mtpc_account_deleteAccount), "account.deleteAccount" },
+};
+
+[[nodiscard]] std::string_view GatedMethodName(std::uint32_t constructorId) {
+	for (const auto &method : kGatedMethods) {
+		if (method.constructorId == constructorId) {
+			return method.name;
+		}
+	}
+	return {};
+}
+
+[[nodiscard]] std::uint32_t RequestConstructorId(
+		const SerializedRequest &request) {
+	const auto &data = *request;
+	if (data.size() <= SerializedRequest::kMessageBodyPosition) {
+		return 0;
+	}
+	return uint32(data.at(SerializedRequest::kMessageBodyPosition));
+}
 
 } // namespace
 
@@ -71,6 +148,7 @@ public:
 	void setGoodProxyDomain(const QString &host, const QString &ip);
 	void suggestMainDcId(DcId mainDcId);
 	void setMainDcId(DcId mainDcId);
+	void setSignedIn(bool value);
 	[[nodiscard]] bool hasMainDcId() const;
 	[[nodiscard]] DcId mainDcId() const;
 	[[nodiscard]] rpl::producer<DcId> mainDcIdValue() const;
@@ -130,6 +208,9 @@ public:
 		crl::time msCanWait,
 		bool needsLayer,
 		mtpRequestId afterRequestId);
+	[[nodiscard]] Impulse::RouteDecision routeRequest(
+		const SerializedRequest &request) const;
+	void refuseLocally(mtpRequestId requestId, const std::string &type);
 	void registerRequest(mtpRequestId requestId, ShiftedDcId shiftedDcId);
 	void unregisterRequest(mtpRequestId requestId);
 	void storeRequest(
@@ -252,6 +333,7 @@ private:
 	std::unique_ptr<DomainResolver> _domainResolver;
 	std::unique_ptr<SpecialConfigRequest> _httpUnixtimeLoader;
 	QString _userPhone;
+	bool signedIn = false;
 	mtpRequestId _cdnConfigLoadRequestId = 0;
 	crl::time _lastConfigLoadedTime = 0;
 	crl::time _configExpiresAt = 0;
@@ -530,6 +612,10 @@ void Instance::Private::requestConfig() {
 		},
 		_proxySettings.isEnabled());
 	_configLoader->load();
+}
+
+void Instance::Private::setSignedIn(bool value) {
+	signedIn = value;
 }
 
 void Instance::Private::setUserPhone(const QString &phone) {
@@ -1036,6 +1122,12 @@ void Instance::Private::sendRequest(
 	const auto signedDcId = toMainDc ? -realShiftedDcId : realShiftedDcId;
 	registerRequest(requestId, signedDcId);
 
+	const auto route = routeRequest(request);
+	if (route.refused) {
+		refuseLocally(requestId, route.refusalType);
+		return;
+	}
+
 	request->lastSentTime = crl::now();
 	request->needsLayer = needsLayer;
 
@@ -1056,6 +1148,32 @@ void Instance::Private::sendRequest(
 	}
 
 	session->sendPrepared(request, msCanWait);
+}
+
+Impulse::RouteDecision Instance::Private::routeRequest(
+		const SerializedRequest &request) const {
+	const auto constructorId = RequestConstructorId(request);
+	return Impulse::routeMethod(Impulse::RouteRequest{
+		.method = std::string(GatedMethodName(constructorId)),
+		.mapped = true,
+		.signedIn = signedIn,
+	});
+}
+
+void Instance::Private::refuseLocally(
+		mtpRequestId requestId,
+		const std::string &type) {
+	auto reply = mtpBuffer();
+	MTPRpcError(MTP_rpc_error(
+		MTP_int(Impulse::kClientRefusalCode),
+		MTP_string(type))).write(reply);
+	const auto response = Response{
+		.reply = std::move(reply),
+		.requestId = requestId,
+	};
+	crl::on_main(_instance.get(), [=] {
+		processCallback(response);
+	});
 }
 
 void Instance::Private::registerRequest(
@@ -1964,6 +2082,10 @@ void Instance::suggestMainDcId(DcId mainDcId) {
 
 void Instance::setMainDcId(DcId mainDcId) {
 	_private->setMainDcId(mainDcId);
+}
+
+void Instance::setSignedIn(bool value) {
+	_private->setSignedIn(value);
 }
 
 DcId Instance::mainDcId() const {

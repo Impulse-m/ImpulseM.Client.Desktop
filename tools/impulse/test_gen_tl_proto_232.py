@@ -270,6 +270,15 @@ class MappingTest(unittest.TestCase):
             self.assertNotIn(name, names)
             self.assertIn(name, self.report["absentMethods"])
 
+    def test_every_hidden_method_in_scheme_is_omitted(self) -> None:
+        schemeNames: Set[str] = {m["predicate"] for m in self.scheme_methods() if "." in m["predicate"]}
+        names: Set[str] = {m["method"] for m in self.mapping["methods"]}
+        hiddenInScheme: Set[str] = schemeNames & set(gen.HIDDEN_METHODS)
+        self.assertEqual(len(hiddenInScheme), len(set(gen.HIDDEN_METHODS)))
+        self.assertEqual(names & hiddenInScheme, set())
+        for name in hiddenInScheme:
+            self.assertIn(name, self.report["absentMethods"])
+
     def test_output_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as tmpName:
             second: Path = Path(tmpName) / "second.json.gz"

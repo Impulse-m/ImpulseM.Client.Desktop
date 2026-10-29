@@ -17,6 +17,7 @@ import argparse
 import gzip
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -24,6 +25,11 @@ TOOLS_DIR: Path = Path(__file__).resolve().parent
 REPO_ROOT: Path = TOOLS_DIR.parent.parent
 SCHEMA_PATH: Path = REPO_ROOT / "Telegram" / "SourceFiles" / "mtproto" / "scheme" / "api.tl"
 PROTOS_DIR: Path = TOOLS_DIR / "protos"
+
+# Isolated mode (python -I) leaves the script directory off sys.path, so add the tools directory explicitly.
+sys.path.insert(0, str(TOOLS_DIR))
+
+from tl232.hidden_list import HIDDEN_METHODS  # noqa: E402
 
 LAYER: int = 232
 VECTOR_PREDICATE: str = "vector"
@@ -538,6 +544,9 @@ def build_mapping(scheme: Dict[str, Any], protosDir: Path) -> Tuple[Dict[str, An
             continue
         if m["predicate"] in EXCLUDED_METHODS:
             absentMethods[m["predicate"]] = EXCLUDED_METHODS[m["predicate"]]
+            continue
+        if m["predicate"] in HIDDEN_METHODS:
+            absentMethods[m["predicate"]] = "hidden list: mapping omission, not a UI hide"
             continue
         methodEntry: Optional[Dict[str, Any]]
         methodProblem: Optional[str]

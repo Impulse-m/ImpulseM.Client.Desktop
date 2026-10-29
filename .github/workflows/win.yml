@@ -48,18 +48,13 @@ jobs:
 
   windows:
     name: Windows
-    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || ((github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/nightly') && 'depot-windows-latest-16' || 'windows-latest') }}
+    runs-on: windows-latest
 
     strategy:
       matrix:
-        arch: [x64_x86, x64, arm64]
+        arch: [x64]
         qt: ["", qt6]
         generator: ["", "Ninja Multi-Config"]
-        exclude:
-          - arch: arm64
-            qt: ""
-          - arch: x64_x86
-            qt: qt6
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -105,26 +100,12 @@ jobs:
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
 
-      - name: Install VS 2026 Build Tools.
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: |
-          $exe = Join-Path $env:RUNNER_TEMP 'vs_buildtools.exe'
-          Invoke-WebRequest -Uri https://aka.ms/vs/18/stable/vs_buildtools.exe -OutFile $exe
-          $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList `
-            '--quiet','--wait','--norestart','--nocache', `
-            '--add','Microsoft.VisualStudio.Workload.VCTools', `
-            '--add','Microsoft.VisualStudio.Component.VC.Tools.ARM64', `
-            '--add','Microsoft.VisualStudio.Component.VC.ATL.ARM64'
-          Remove-Item $exe -Force -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
-
-      - uses: Eden-CI/msvc-dev-cmd@master
+      - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
         name: Native Tools Command Prompt.
         with:
           arch: ${{ matrix.arch }}
           sdk: ${{ env.SDK }}
-          toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
+          toolset: 14.44
 
       - name: NuGet sources.
         run: |
@@ -168,6 +149,9 @@ jobs:
 
       - name: Read configuration matrix.
         shell: bash
+        env:
+          IMPULSEM_API_ID: ${{ secrets.IMPULSEM_API_ID }}
+          IMPULSEM_API_HASH: ${{ secrets.IMPULSEM_API_HASH }}
         run: |
           ARTIFACT_NAME="Telegram"
 
@@ -198,20 +182,15 @@ jobs:
           echo "TDESKTOP_BUILD_ARCH=$ARCH" >> $GITHUB_ENV
 
           DEFINE=""
-          if [ -n "${{ matrix.defines }}" ]; then
-            DEFINE="-D ${{ matrix.defines }}=ON"
-            echo "Define from matrix: $DEFINE"
-            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.defines }}"
-          fi
           echo "TDESKTOP_BUILD_DEFINE=$DEFINE" >> $GITHUB_ENV
 
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
-          API="-D TDESKTOP_API_TEST=ON"
-          if [ $GITHUB_REF == 'refs/heads/nightly' ]; then
-            echo "Use the open credentials."
-            API="-D TDESKTOP_API_ID=611335 -D TDESKTOP_API_HASH=d524b414d21f4d37f08684c1df41ac9c"
+          if [ -z "$IMPULSEM_API_ID" ] || [ -z "$IMPULSEM_API_HASH" ]; then
+            echo "The IMPULSEM_API_ID and IMPULSEM_API_HASH secrets are required."
+            exit 1
           fi
+          API="-D TDESKTOP_API_ID=$IMPULSEM_API_ID -D TDESKTOP_API_HASH=$IMPULSEM_API_HASH"
           echo "TDESKTOP_BUILD_API=$API" >> $GITHUB_ENV
 
       - name: Free up some disk space.
@@ -237,13 +216,25 @@ jobs:
 
           cmake --build ..\out --config Debug --parallel
 
+      - name: Impulse unit tests.
+        run: |
+          %TBUILD%\%REPO_NAME%\out\Debug\impulse_tests.exe
+          if errorlevel 1 exit /b 1
+          cd %TBUILD%\%REPO_NAME%
+          for /R tools\impulse %%f in (test_*.py) do (
+            python -I "%%f"
+            if errorlevel 1 exit /b 1
+          )
+
       - name: Move artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
         run: |
           set OUT=%TBUILD%\%REPO_NAME%\out\Debug
           mkdir artifact
-          move %OUT%\Telegram.exe artifact/
+          move %OUT%\ImpulseM.exe artifact/
           move %OUT%\Updater.exe artifact/
+          xcopy %OUT%\modules\x64 artifact\modules\x64\ /E /I /Y
+          if errorlevel 1 exit /b 1
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')

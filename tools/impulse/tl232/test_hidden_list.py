@@ -1,9 +1,13 @@
 import re
+import sys
 import unittest
 from pathlib import Path
 from typing import List, Set
 
-import hidden_list
+# Isolated mode (python -I) leaves the script directory off sys.path, so add it explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import hidden_list  # noqa: E402
 
 TOOLS_DIR: Path = Path(__file__).resolve().parent
 ROOT: Path = TOOLS_DIR.parent.parent.parent

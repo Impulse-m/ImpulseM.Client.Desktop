@@ -32,8 +32,11 @@ constexpr std::uint32_t kInvokeWithApnsSecretId = 0x0dae54f8u;
 constexpr std::uint32_t kInvokeWithReCaptchaId = 0xadbb0f94u;
 
 constexpr std::size_t kMaxDepth = 256;
+constexpr std::size_t kInt32Bytes = 4;
+constexpr std::size_t kInt64Bytes = 8;
 constexpr std::size_t kInt128Bytes = 16;
 constexpr std::size_t kInt256Bytes = 32;
+constexpr std::size_t kTlBytesMinBytes = 4;
 constexpr std::size_t kInitConnectionStringCount = 6;
 constexpr std::uint32_t kInitConnectionProxyFlag = 1u;
 constexpr std::uint32_t kInitConnectionParamsFlag = 2u;
@@ -109,6 +112,21 @@ using ProtoBody = Transcoder::ProtoBody;
 		return std::uint64_t{0};
 	}
 	return occurrences.back().value;
+}
+
+// The fewest TL bytes that one element of this kind takes on the wire. A
+// count that needs more bytes than the input has left cannot be satisfied.
+[[nodiscard]] std::size_t minimumElementBytes(const std::string &kind) {
+	if (kind == "long" || kind == "double") {
+		return kInt64Bytes;
+	} else if (kind == "int128") {
+		return kInt128Bytes;
+	} else if (kind == "int256") {
+		return kInt256Bytes;
+	} else if (kind == "string" || kind == "bytes") {
+		return kTlBytesMinBytes;
+	}
+	return kInt32Bytes;
 }
 
 [[nodiscard]] bool isPackableKind(const std::string &kind) {
@@ -340,7 +358,8 @@ void TlWriter::writeBytes(std::span<const std::uint8_t> value) {
 		header = 4;
 	}
 	out.insert(out.end(), value.begin(), value.end());
-	while ((header + length) % 4 != 0) {
+	const std::size_t padding = (4 - (header + length) % 4) % 4;
+	for (std::size_t index = 0; index < padding; ++index) {
 		out.push_back(0);
 	}
 }
@@ -457,7 +476,8 @@ bool Transcoder::skipWrapper(std::uint32_t id, TlReader &reader) const {
 	case kInvokeAfterMsgsId: {
 		expectVector(reader);
 		const std::int32_t count = reader.readInt32();
-		if (count < 0) {
+		if (count < 0
+			|| static_cast<std::size_t>(count) > reader.remaining() / kInt64Bytes) {
 			throw TranscodeError(kTranscodeFailedType, "bad msg_ids count");
 		}
 		for (std::int32_t index = 0; index < count; ++index) {
@@ -627,7 +647,9 @@ void Transcoder::encodeVector(
 		std::size_t depth) const {
 	expectVector(reader);
 	const std::int32_t count = reader.readInt32();
-	if (count < 0 || static_cast<std::size_t>(count) > reader.remaining()) {
+	const std::size_t minimumBytes = minimumElementBytes(field.kind);
+	if (count < 0
+		|| static_cast<std::size_t>(count) > reader.remaining() / minimumBytes) {
 		throw TranscodeError(kTranscodeFailedType, "bad vector length");
 	}
 	if (count == 0) {

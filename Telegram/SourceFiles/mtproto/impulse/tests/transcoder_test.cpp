@@ -489,3 +489,80 @@ IMPULSE_TEST(TranscoderDecodesPackedAndUnpackedIntVectors) {
 	IMPULSE_CHECK(
 		transcoder.decodeResult(listMethodId, Hex("08 01 08 02 08 ac 02"), {}) == expected);
 }
+
+IMPULSE_TEST(TlWriterPadsBytesToFourAndTerminates) {
+	Impulse::TlWriter writer;
+	writer.writeBytes(Hex("68 69"));
+	IMPULSE_CHECK(writer.bytes() == Hex("02 68 69 00"));
+
+	// The long form frames 254 bytes with four header bytes, so 258 pads to 260.
+	Impulse::TlWriter longWriter;
+	const std::vector<std::uint8_t> payload(254, 0x55);
+	longWriter.writeBytes(payload);
+	IMPULSE_CHECK(longWriter.bytes().size() == 260);
+}
+
+IMPULSE_TEST(TranscoderRejectsZeroFieldTagLoop) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// A zero tag is field number 0, which protobuf does not allow.
+	IMPULSE_CHECK(
+		DecodeObjectErrorType(transcoder, "Peer", Hex("00 00 00 00"))
+		== "CLIENT_TRANSCODE_FAILED");
+}
+
+IMPULSE_TEST(TranscoderZeroLengthArmDecodesWithoutLooping) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// An empty peerUser body: the absent user_id reads as zero, and the
+	// repeated zero-length arms do not repeat the decode.
+	IMPULSE_CHECK(
+		transcoder.decodeObject("Peer", Hex("0a00 0a00 0a00"), {})
+		== Hex("22175159 0000000000000000"));
+}
+
+IMPULSE_TEST(TranscoderRejectsProtoLengthBeyondInput) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// Field 1 claims 16 bytes, and one byte follows.
+	IMPULSE_CHECK(
+		DecodeObjectErrorType(transcoder, "Peer", Hex("0a 10 01"))
+		== "CLIENT_TRANSCODE_FAILED");
+}
+
+IMPULSE_TEST(TranscoderRejectsMsgIdsCountBeyondInput) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// invokeAfterMsgs with a vector count of 0x7fffffff and no msg_ids after it.
+	IMPULSE_CHECK(
+		EncodeRequestErrorType(transcoder, Hex("f0b4c43d 15c4b51c ffffff7f"))
+		== "CLIENT_TRANSCODE_FAILED");
+}
+
+IMPULSE_TEST(TlReaderRejectsBytesLengthBeyondInput) {
+	const std::vector<std::uint8_t> bytes = Hex("fe ffffff");
+	Impulse::TlReader reader(bytes);
+	bool thrown = false;
+	try {
+		static_cast<void>(reader.readBytes());
+	} catch (const Impulse::TranscodeError &error) {
+		thrown = error.type() == "CLIENT_TRANSCODE_FAILED";
+	}
+	IMPULSE_CHECK(thrown);
+}

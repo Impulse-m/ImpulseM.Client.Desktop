@@ -235,6 +235,10 @@ private:
 	// seen ready, for the diagnostic lines.
 	std::uint64_t serial = 0;
 	bool loginReadyNoted = false;
+
+	// Set from a sign-in until the transport is rebuilt for the session. The
+	// sockets are keyed to the identity until then, so no login call is sent.
+	bool rekeying = false;
 };
 
 } // namespace Impulse

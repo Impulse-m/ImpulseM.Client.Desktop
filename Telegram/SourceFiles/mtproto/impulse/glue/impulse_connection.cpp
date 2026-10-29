@@ -738,7 +738,7 @@ void ImpulseConnection::cancel(mtpRequestId requestId) {
 }
 
 bool ImpulseConnection::loginReady() const {
-	return (userId != 0) && tokens->hasSession();
+	return !rekeying && (userId != 0) && tokens->hasSession();
 }
 
 void ImpulseConnection::noteLoginReady() {
@@ -991,20 +991,34 @@ void ImpulseConnection::adoptLogin(const SessionTokens &pair) {
 	tokens->onLoginTokens(pair);
 	refreshIdentityLane();
 
-	// The update socket connected with the identity token. It reconnects now
-	// and asks for the access token.
-	if (updateClient) {
-		static_cast<void>(updateClient->reconnectNow());
-	}
-
-	// The user is bound last. The calls that wait for the login are released
-	// here, and the account lanes follow the user.
+	// The sockets are keyed to the identity token, and a reconnect of a live
+	// socket keeps that token. Every socket is built again instead, so each new
+	// client has no cached token and the update socket asks for the session
+	// token. The rebuild destroys the carrier that delivers this reply, so it
+	// runs once the reply is settled. Until then no login call is sent.
+	rekeying = true;
 	bindUser(pair.userId);
-	releaseLoginWaiters();
+	crl::on_main(this, [=] {
+		if (started) {
+			connectionState.onNetworkLost();
+		}
+		rebuildTransport(currentRoute);
+		if (started) {
+			connectSockets();
+		}
+		DEBUG_LOG(("Impulse Info: connection %1 rebuilt the transport for the session of user %2."
+			).arg(QString::number(serial)
+			).arg(QString::number(userId)));
+		rekeying = false;
 
-	// The socket is rekeyed to the access token: declare the connection again
-	// with it.
-	declarer->credentialChanged();
+		// The calls that wait for the login are released once the sockets are
+		// keyed. The account lanes already follow the user.
+		noteLoginReady();
+		releaseLoginWaiters();
+
+		// The rebuilt sockets are declared again with the session token.
+		declarer->credentialChanged();
+	});
 }
 
 void ImpulseConnection::buildTransport(const TransportRoute &route) {

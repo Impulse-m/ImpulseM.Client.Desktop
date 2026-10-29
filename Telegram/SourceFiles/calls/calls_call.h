@@ -303,6 +303,8 @@ private:
 		const MTPPhoneCallDiscardReason &reason
 			= MTP_phoneCallDiscardReasonDisconnect(),
 		Data::GroupCall *migrateCall = nullptr);
+	void discardByTimeout();
+	void startConnectDeadline();
 	void finishByMigration(const QString &slug);
 	void showRatingBox();
 	void startOutgoing();

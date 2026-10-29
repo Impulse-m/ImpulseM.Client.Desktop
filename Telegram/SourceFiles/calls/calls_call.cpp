@@ -37,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
 
+#include <algorithm>
+
 namespace tgcalls {
 class InstanceImpl;
 class InstanceV2Impl;
@@ -50,6 +52,13 @@ constexpr auto kMinLayer = 65;
 constexpr auto kMaxLayer = 92;
 constexpr auto kLiveKitLibraryVersion = "impulsem-livekit-1";
 constexpr auto kHangupTimeoutMs = 5000;
+// Added to every canon call timeout, as the server does, so the client's
+// clock runs out before the server's own deadline. Not published by the
+// server, so it is a client constant.
+constexpr auto kDeadlineMarginMs = 5000;
+// A hangup whose discard request has been sent is finished locally when the
+// request does not return in time.
+constexpr auto kLeaveTimeoutMs = 10000;
 constexpr auto kSha256Size = 32;
 constexpr auto kAuthKeySize = 256;
 const auto kDefaultVersion = "2.4.4"_q;
@@ -204,7 +213,7 @@ Call::Call(
 , _user(user)
 , _api(&_user->session().mtp())
 , _type(type)
-, _discardByTimeoutTimer([=] { hangup(); })
+, _discardByTimeoutTimer([=] { discardByTimeout(); })
 , _playbackDeviceId(
 	&Core::App().mediaDevices(),
 	Webrtc::DeviceType::Playback,
@@ -231,7 +240,10 @@ Call::Call(
 		setState(State::WaitingUserConfirmation);
 	} else {
 		const auto &config = _user->session().serverConfig();
-		_discardByTimeoutTimer.callOnce(config.callRingTimeoutMs);
+		_discardByTimeoutTimer.callOnce(
+			std::max(
+				config.callReceiveTimeoutMs,
+				config.callRingTimeoutMs) + kDeadlineMarginMs);
 		startWaitingTrack();
 	}
 	setupMediaDevices();
@@ -250,7 +262,7 @@ Call::Call(
 , _api(&_user->session().mtp())
 , _type(Type::Incoming)
 , _state(State::WaitingIncoming)
-, _discardByTimeoutTimer([=] { hangup(); })
+, _discardByTimeoutTimer([=] { discardByTimeout(); })
 , _playbackDeviceId(
 	&Core::App().mediaDevices(),
 	Webrtc::DeviceType::Playback,
@@ -379,7 +391,10 @@ void Call::startOutgoing() {
 		}
 
 		const auto &config = _user->session().serverConfig();
-		_discardByTimeoutTimer.callOnce(config.callReceiveTimeoutMs);
+		_discardByTimeoutTimer.callOnce(
+			std::max(
+				config.callReceiveTimeoutMs,
+				config.callRingTimeoutMs) + kDeadlineMarginMs);
 		handleUpdate(phoneCall);
 	}).fail([this](const MTP::Error &error) {
 		handleRequestError(error.type());
@@ -476,6 +491,7 @@ void Call::actuallyAnswer() {
 	} else {
 		_answerAfterDhConfigReceived = false;
 	}
+	startConnectDeadline();
 	_api.request(MTPphone_AcceptCall(
 		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
 		MTP_bytes(_gb),
@@ -490,6 +506,8 @@ void Call::actuallyAnswer() {
 
 		const auto &call = result.c_phone_phoneCall();
 		_user->session().data().processUsers(call.vusers());
+		// Pending Impulse-m/ImpulseM#1038, point 1: the answer to
+		// phone.acceptCall is taken as the server sends it, no workaround.
 		if (call.vphone_call().type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: "
 				"Not phoneCallWaiting in response to phone.acceptCall."));
@@ -707,6 +725,27 @@ void Call::hangup(Data::GroupCall *migrateCall, const QString &migrateSlug) {
 	}
 }
 
+void Call::startConnectDeadline() {
+	const auto &config = _user->session().serverConfig();
+	_discardByTimeoutTimer.callOnce(
+		config.callConnectTimeoutMs + kDeadlineMarginMs);
+}
+
+void Call::discardByTimeout() {
+	// Ringing ends as missed, a join that does not connect in time ends as
+	// a disconnect, as the server's own deadlines do.
+	const auto state = _state.current();
+	const auto ringing = (state == State::Starting)
+		|| (state == State::WaitingIncoming)
+		|| (state == State::Waiting)
+		|| (state == State::Ringing);
+	finish(
+		FinishType::Ended,
+		ringing
+			? MTP_phoneCallDiscardReasonMissed()
+			: MTP_phoneCallDiscardReasonDisconnect());
+}
+
 void Call::redial() {
 	Expects(!conferenceInvite());
 
@@ -833,8 +872,8 @@ bool Call::handleUpdate(const MTPPhoneCall &call) {
 		if (_type == Type::Outgoing
 			&& _state.current() == State::Waiting
 			&& data.vreceive_date().value_or_empty() != 0) {
-			const auto &config = _user->session().serverConfig();
-			_discardByTimeoutTimer.callOnce(config.callRingTimeoutMs);
+			// The ringing deadline was set with the request, the same
+			// max(receive, ring) + margin the server uses, so it is kept.
 			setState(State::Ringing);
 			startWaitingTrack();
 		}
@@ -1006,6 +1045,7 @@ void Call::confirmAcceptedCall(const MTPDphoneCallAccepted &call) {
 	MTP::AuthKey::FillData(_authKey, computedAuthKey);
 	_keyFingerprint = ComputeFingerprint(_authKey);
 
+	startConnectDeadline();
 	setState(State::ExchangingKeys);
 	_api.request(MTPphone_ConfirmCall(
 		MTP_inputPhoneCall(MTP_long(_id), MTP_long(_accessHash)),
@@ -1066,7 +1106,6 @@ void Call::startConfirmedCall(const MTPDphoneCall &call) {
 void Call::createAndStartController(const MTPDphoneCall &call) {
 	Expects(!conferenceInvite());
 
-	_discardByTimeoutTimer.cancel();
 	if (!checkCallFields(call) || _authKey.size() != kAuthKeySize) {
 		return;
 	}
@@ -1395,6 +1434,7 @@ void Call::setState(State state) {
 		switch (state) {
 		case State::Established:
 			_startTime = crl::now();
+			_discardByTimeoutTimer.cancel();
 			break;
 		case State::ExchangingKeys:
 			_delegate->callPlaySound(Delegate::CallSound::Connecting);
@@ -1563,6 +1603,7 @@ void Call::finish(
 		Data::GroupCall *migrateCall) {
 	Expects(type != FinishType::None);
 
+	_discardByTimeoutTimer.cancel();
 	setSignalBarCount(kSignalBarFinished);
 
 	const auto finalState = (type == FinishType::Ended)
@@ -1603,9 +1644,11 @@ void Call::finish(
 	const auto connectionId = _instance
 		? _instance->getPreferredRelayId()
 		: 0;
-	_finishByTimeoutTimer.call(kHangupTimeoutMs, [this, finalState] {
-		setState(finalState);
-	});
+	_finishByTimeoutTimer.call(
+		kLeaveTimeoutMs + kDeadlineMarginMs,
+		[this, finalState] {
+			setState(finalState);
+		});
 
 	using Video = Webrtc::VideoState;
 	const auto flags = ((_videoIncoming->state() != Video::Inactive)

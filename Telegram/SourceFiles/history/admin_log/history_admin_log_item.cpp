@@ -460,6 +460,9 @@ QString GenerateInviteLinkText(const MTPExportedChatInvite &data) {
 	).replace(
 		u"t.me/joinchat/"_q,
 		QString()
+	).replace(
+		u"o.impulsem.net/joinchat/"_q,
+		QString()
 	) : label;
 }
 
@@ -759,9 +762,10 @@ TextWithEntities GenerateDefaultBannedRightsChangeText(
 		not_null<ChannelData*> channel,
 		const MTPForumTopic &topic) {
 	return topic.match([&](const MTPDforumTopic &data) {
-		const auto url = u"https://t.me/c/%1/%2"_q.arg(
-			peerToChannel(channel->id).bare).arg(
-				data.vid().v);
+		const auto url = channel->session().createInternalLinkFull(
+			u"c/%1/%2"_q.arg(
+				peerToChannel(channel->id).bare).arg(
+					data.vid().v));
 		return tr::link(
 			Data::ForumTopicIconWithTitle(
 				data.vid().v,

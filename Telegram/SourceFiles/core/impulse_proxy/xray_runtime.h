@@ -27,10 +27,37 @@ enum class Error {
 	NoServer,
 	InvalidConfig,
 	CoreStart,
+	CoreStopped,
 };
 
 // The "err:..." text of the error, as the Android client names it.
 [[nodiscard]] std::string_view ErrorCode(Error error);
+
+// Seconds between two health checks of a running core.
+inline constexpr int kHealthCheckSeconds = 30;
+
+// What the periodic health check does next, as Android HealthPolicy decides.
+enum class HealthAction {
+	// The check is stale (an older generation, or the core is not running).
+	// Nothing is scheduled.
+	Stop,
+	// The core is alive. The retry allowance is cleared and the next check is
+	// scheduled.
+	Recheck,
+	// The core died for the first time. It is restarted once.
+	Restart,
+	// The core died again after an automatic restart. The runtime is FAILED
+	// with Error::CoreStopped.
+	Fail,
+};
+
+// The pure policy of one health check. current: the checked generation is the
+// running one and the status is Running; alreadyRetried: an automatic restart
+// happened since the last healthy check; alive: the core answered that it runs.
+[[nodiscard]] HealthAction DecideHealth(
+	bool current,
+	bool alreadyRetried,
+	bool alive);
 
 // Loopback inbounds of the running core. Both inbounds use the same
 // credentials. The user is 32 hex characters and the password 48.
@@ -59,16 +86,30 @@ public:
 	// selected server when the proxy is enabled. Blocks until the core is
 	// started or failed, so it must not run on the UI thread. Concurrent
 	// restarts run one after another. The endpoints are cleared before the
-	// restart begins.
+	// restart begins. A restart is a new generation, and it clears the
+	// automatic retry allowance of the health check.
 	void restart(const Impulse::ProxyState::State &state);
+
+	// Runs one health check of the core started in the given generation, on
+	// the same thread as restart. Restart restarts the core with the state of
+	// the last restart. The owner schedules the next check after
+	// kHealthCheckSeconds when the status is still Running after a Recheck or
+	// a Restart, and schedules nothing after Stop or Fail.
+	[[nodiscard]] HealthAction checkHealth(int expectedGeneration);
 
 	[[nodiscard]] Status status() const;
 	[[nodiscard]] Error error() const;
+
+	// Increases with every restart. Health checks of an older generation are
+	// stale.
+	[[nodiscard]] int generation() const;
 
 	// Present only while the status is Running.
 	[[nodiscard]] std::optional<Endpoints> endpoints() const;
 
 private:
+	void restartLocked(const Impulse::ProxyState::State &state);
+
 	void setState(
 		Status newStatus,
 		Error newError,
@@ -81,6 +122,11 @@ private:
 	Status currentStatus = Status::Off;
 	Error currentError = Error::None;
 	std::optional<Endpoints> currentEndpoints;
+	int currentGeneration = 0;
+
+	// Guarded by restartMutex.
+	std::optional<Impulse::ProxyState::State> appliedState;
+	bool autoRetried = false;
 };
 
 } // namespace Impulse::Xray

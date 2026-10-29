@@ -251,10 +251,25 @@ std::string_view ErrorCode(Error error) {
 		return "err:invalidConfig";
 	case Error::CoreStart:
 		return "err:coreStart";
+	case Error::CoreStopped:
+		return "err:coreStopped";
 	case Error::None:
 		break;
 	}
 	return "";
+}
+
+HealthAction DecideHealth(
+		bool current,
+		bool alreadyRetried,
+		bool alive) {
+	if (!current) {
+		return HealthAction::Stop;
+	}
+	if (alive) {
+		return HealthAction::Recheck;
+	}
+	return alreadyRetried ? HealthAction::Fail : HealthAction::Restart;
 }
 
 Runtime::Runtime(Invoker libraryInvoker)
@@ -263,6 +278,16 @@ Runtime::Runtime(Invoker libraryInvoker)
 
 void Runtime::restart(const ProxyState::State &state) {
 	std::lock_guard<std::mutex> restartLock(restartMutex);
+	autoRetried = false;
+	restartLocked(state);
+}
+
+void Runtime::restartLocked(const ProxyState::State &state) {
+	{
+		std::lock_guard<std::mutex> lock(stateMutex);
+		++currentGeneration;
+	}
+	appliedState = state;
 
 	// Fail closed: the endpoints go away before the old core is stopped.
 	setState(Status::Off, Error::None, std::nullopt);
@@ -314,6 +339,32 @@ void Runtime::restart(const ProxyState::State &state) {
 			credentials.user,
 			credentials.password,
 		});
+}
+
+HealthAction Runtime::checkHealth(int expectedGeneration) {
+	std::lock_guard<std::mutex> restartLock(restartMutex);
+	const bool current = expectedGeneration == generation()
+		&& status() == Status::Running;
+	const bool alive = current && QueryRunning(invoker).value_or(false);
+	const HealthAction action = DecideHealth(current, autoRetried, alive);
+	if (action == HealthAction::Recheck) {
+		autoRetried = false;
+	} else if (action == HealthAction::Restart) {
+		autoRetried = true;
+		if (appliedState) {
+			// A copy: restartLocked assigns appliedState while it runs.
+			const ProxyState::State last = *appliedState;
+			restartLocked(last);
+		}
+	} else if (action == HealthAction::Fail) {
+		setState(Status::Failed, Error::CoreStopped, std::nullopt);
+	}
+	return action;
+}
+
+int Runtime::generation() const {
+	std::lock_guard<std::mutex> lock(stateMutex);
+	return currentGeneration;
 }
 
 Status Runtime::status() const {

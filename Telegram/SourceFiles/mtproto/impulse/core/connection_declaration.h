@@ -1,4 +1,4 @@
-// Connection declaration (initConnection, contract 4.4). The declaration is
+// Connection declaration (initConnection). The declaration is
 // read from the wrappers of a TL request and encoded as the proto payload of
 // the initConnection method. Qt-free, std only.
 #pragma once
@@ -11,7 +11,7 @@
 
 namespace Impulse {
 
-// The fields of ConnectionDeclaration, in contract 4.4 numbering.
+// The fields of ConnectionDeclaration, in the proto field numbering of initConnection.
 struct ConnectionDeclaration {
 	std::int32_t apiId = 0;
 	std::string deviceModel;

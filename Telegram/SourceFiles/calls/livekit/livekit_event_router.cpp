@@ -101,6 +101,13 @@ void LiveKitEventRouter::dispatch(const LiveKitEvent &event) {
 		&& event.videoBuffer->bufferHandle) {
 		releaseHandle(event.videoBuffer->bufferHandle);
 	}
+	// A remote publication that no route owns is released here too, since the
+	// owner that would release it is gone.
+	if (releaseHandle
+		&& event.kind == LiveKitEventKind::TrackPublished
+		&& event.publicationHandle) {
+		releaseHandle(*event.publicationHandle);
+	}
 }
 
 void LiveKitEventRouter::dropKeys(RouteId id) {

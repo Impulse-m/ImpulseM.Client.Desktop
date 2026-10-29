@@ -21,6 +21,21 @@ constexpr std::uint32_t kFfiRequestLocalTrackMute = 17;
 constexpr std::uint32_t kFfiResponseLocalTrackMute = 17;
 constexpr std::uint32_t kFfiRequestNewVideoStream = 20;
 constexpr std::uint32_t kFfiRequestReadyForRoomEvent = 83;
+constexpr std::uint32_t kFfiRequestCaptureVideoFrame = 22;
+constexpr std::uint32_t kFfiResponseCaptureVideoFrame = 22;
+constexpr std::uint32_t kFfiRequestRemotePublicationQuality = 68;
+constexpr std::uint32_t kFfiResponseRemotePublicationQuality = 67;
+
+// CaptureVideoFrameRequest fields and the rotation of an unrotated frame.
+constexpr std::uint32_t kCaptureSourceHandle = 1;
+constexpr std::uint32_t kCaptureBuffer = 2;
+constexpr std::uint32_t kCaptureTimestampUs = 3;
+constexpr std::uint32_t kCaptureRotation = 4;
+constexpr std::uint64_t kVideoRotation0 = 0;
+
+// SetRemoteTrackPublicationQualityRequest fields.
+constexpr std::uint32_t kRemoteQualityPublicationHandle = 1;
+constexpr std::uint32_t kRemoteQualityQuality = 2;
 
 // LocalTrackMuteRequest and LocalTrackMuteResponse fields (livekit-ffi
 // protocol, track messages).
@@ -82,8 +97,15 @@ constexpr std::uint64_t kVideoBufferTypeI420 = 5;
 
 // NewAudioSourceRequest fields and AudioSourceType.PLATFORM.
 constexpr std::uint32_t kNewAudioSourceType = 1;
+constexpr std::uint32_t kNewAudioSourceOptions = 2;
 constexpr std::uint32_t kNewAudioSourcePlatformAudioHandle = 6;
 constexpr std::uint64_t kAudioSourceTypePlatform = 1;
+
+// AudioSourceOptions fields. Echo cancellation and gain control are on, as the
+// LiveKit defaults that Android uses.
+constexpr std::uint32_t kAudioOptionsEchoCancellation = 1;
+constexpr std::uint32_t kAudioOptionsNoiseSuppression = 2;
+constexpr std::uint32_t kAudioOptionsAutoGainControl = 3;
 
 // CreateAudioTrackRequest and CreateVideoTrackRequest fields.
 constexpr std::uint32_t kCreateTrackName = 1;
@@ -92,6 +114,7 @@ constexpr std::uint32_t kCreateTrackSourceHandle = 2;
 // NewVideoSourceRequest fields, VideoSourceType.NATIVE and VideoSourceResolution.
 constexpr std::uint32_t kNewVideoSourceType = 1;
 constexpr std::uint32_t kNewVideoSourceResolution = 2;
+constexpr std::uint32_t kNewVideoSourceScreencast = 3;
 constexpr std::uint32_t kVideoSourceTypeNative = 0;
 constexpr std::uint32_t kResolutionWidth = 1;
 constexpr std::uint32_t kResolutionHeight = 2;
@@ -132,6 +155,8 @@ constexpr std::uint32_t kRoomEventTrackSubscribed = 9;
 constexpr std::uint32_t kRoomEventTrackUnsubscribed = 10;
 constexpr std::uint32_t kRoomEventDisconnected = 22;
 constexpr std::uint32_t kRoomEventE2eeStateChanged = 25;
+constexpr std::uint32_t kRoomEventTrackPublished = 7;
+constexpr std::uint32_t kRoomEventTrackUnpublished = 8;
 
 // Disconnected.reason, and the DisconnectReason value of a disconnect that this
 // client asked for (participant.proto).
@@ -147,6 +172,13 @@ constexpr std::uint32_t kTrackSubscribedIdentity = 1;
 constexpr std::uint32_t kTrackSubscribedTrack = 2;
 constexpr std::uint32_t kTrackUnsubscribedIdentity = 1;
 constexpr std::uint32_t kTrackUnsubscribedSid = 2;
+
+// TrackPublished fields (participant identity and OwnedTrackPublication) and
+// TrackUnpublished fields (participant identity and publication sid).
+constexpr std::uint32_t kTrackPublishedIdentity = 1;
+constexpr std::uint32_t kTrackPublishedPublication = 2;
+constexpr std::uint32_t kTrackUnpublishedIdentity = 1;
+constexpr std::uint32_t kTrackUnpublishedSid = 2;
 
 // OwnedTrack and TrackInfo fields. TrackInfo.kind is TrackKind: 1 audio, 2 video.
 constexpr std::uint32_t kOwnedTrackInfo = 2;
@@ -165,6 +197,7 @@ constexpr std::uint32_t kOwnedVideoBufferInfo = 2;
 constexpr std::uint32_t kVideoBufferInfoType = 1;
 constexpr std::uint32_t kVideoBufferInfoWidth = 2;
 constexpr std::uint32_t kVideoBufferInfoHeight = 3;
+constexpr std::uint32_t kVideoBufferInfoDataPtr = 4;
 constexpr std::uint32_t kVideoBufferInfoComponents = 7;
 constexpr std::uint32_t kComponentDataPtr = 1;
 constexpr std::uint32_t kComponentStride = 2;
@@ -322,6 +355,54 @@ constexpr std::uint32_t kComponentSize = 3;
 	}
 }
 
+// Reads the TrackPublished of a remote participant. The publication handle is
+// owned by the adapter, the sid and the kind name the track of the publication.
+void DecodeTrackPublished(
+		std::span<const std::uint8_t> payload,
+		LiveKitEvent &result) {
+	result.kind = LiveKitEventKind::TrackPublished;
+	const std::optional<std::string> identity = FindString(
+		payload,
+		kTrackPublishedIdentity);
+	if (identity) {
+		result.participantIdentity = *identity;
+	}
+	const std::optional<std::span<const std::uint8_t>> publication =
+		FindMessage(payload, kTrackPublishedPublication);
+	if (!publication) {
+		return;
+	}
+	result.publicationHandle = OwnedHandleId(*publication);
+	const std::optional<std::span<const std::uint8_t>> info =
+		FindMessage(*publication, kOwnedTrackInfo);
+	if (info) {
+		const std::optional<std::string> sid = FindString(*info, kTrackInfoSid);
+		if (sid) {
+			result.trackSid = *sid;
+		}
+		const std::uint64_t kind = FindVarint(*info, kTrackInfoKind).value_or(0);
+		result.trackKind = TrackKindOf(kind);
+	}
+}
+
+// Reads a TrackUnpublished of a remote participant, which names the publication
+// by its sid.
+void DecodeTrackUnpublished(
+		std::span<const std::uint8_t> payload,
+		LiveKitEvent &result) {
+	result.kind = LiveKitEventKind::TrackUnpublished;
+	const std::optional<std::string> identity = FindString(
+		payload,
+		kTrackUnpublishedIdentity);
+	if (identity) {
+		result.participantIdentity = *identity;
+	}
+	const std::optional<std::string> sid = FindString(payload, kTrackUnpublishedSid);
+	if (sid) {
+		result.trackSid = *sid;
+	}
+}
+
 // Reads the RoomEvent of a room event envelope: the room handle, the track
 // subscription or unsubscription, the room drop and the E2EE state the adapter
 // needs.
@@ -402,6 +483,18 @@ void DecodeRoomEvent(
 		if (sid) {
 			result.trackSid = *sid;
 		}
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> published =
+		FindMessage(payload, kRoomEventTrackPublished);
+	if (published) {
+		DecodeTrackPublished(*published, result);
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> unpublished =
+		FindMessage(payload, kRoomEventTrackUnpublished);
+	if (unpublished) {
+		DecodeTrackUnpublished(*unpublished, result);
 	}
 }
 
@@ -513,9 +606,22 @@ std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioRequest() {
 }
 
 std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioSourceRequest(
-		std::uint64_t platformAudioHandle) {
+		std::uint64_t platformAudioHandle,
+		bool noiseSuppression) {
+	ProtoWriter options;
+	options.writeVarintField(
+		kAudioOptionsEchoCancellation,
+		BoolValue(true));
+	options.writeVarintField(
+		kAudioOptionsNoiseSuppression,
+		BoolValue(noiseSuppression));
+	options.writeVarintField(
+		kAudioOptionsAutoGainControl,
+		BoolValue(true));
+
 	ProtoWriter source;
 	source.writeVarintField(kNewAudioSourceType, kAudioSourceTypePlatform);
+	source.writeMessageField(kNewAudioSourceOptions, options);
 	source.writeVarintField(
 		kNewAudioSourcePlatformAudioHandle,
 		platformAudioHandle);
@@ -533,7 +639,8 @@ std::vector<std::uint8_t> EncodeLiveKitCreateAudioTrackRequest(
 
 std::vector<std::uint8_t> EncodeLiveKitNewVideoSourceRequest(
 		std::uint32_t width,
-		std::uint32_t height) {
+		std::uint32_t height,
+		bool screencast) {
 	ProtoWriter resolution;
 	resolution.writeVarintField(kResolutionWidth, width);
 	resolution.writeVarintField(kResolutionHeight, height);
@@ -541,7 +648,62 @@ std::vector<std::uint8_t> EncodeLiveKitNewVideoSourceRequest(
 	ProtoWriter source;
 	source.writeVarintField(kNewVideoSourceType, kVideoSourceTypeNative);
 	source.writeMessageField(kNewVideoSourceResolution, resolution);
+	if (screencast) {
+		source.writeVarintField(kNewVideoSourceScreencast, BoolValue(true));
+	}
 	return WrapFfiRequest(kFfiRequestNewVideoSource, source);
+}
+
+std::vector<std::uint8_t> EncodeLiveKitCaptureVideoFrameRequest(
+		std::uint64_t sourceHandle,
+		const LiveKitCaptureFrame &frame) {
+	ProtoWriter buffer;
+	buffer.writeVarintField(kVideoBufferInfoType, kVideoBufferTypeI420);
+	buffer.writeVarintField(kVideoBufferInfoWidth, frame.width);
+	buffer.writeVarintField(kVideoBufferInfoHeight, frame.height);
+	// The planar formats are read through the components; the first plane is
+	// the data pointer of the whole buffer.
+	const std::uint64_t firstPlane = frame.components.empty()
+		? 0
+		: frame.components.front().dataPtr;
+	buffer.writeVarintField(kVideoBufferInfoDataPtr, firstPlane);
+	for (const LiveKitVideoComponent &component : frame.components) {
+		ProtoWriter plane;
+		plane.writeVarintField(kComponentDataPtr, component.dataPtr);
+		plane.writeVarintField(kComponentStride, component.stride);
+		plane.writeVarintField(kComponentSize, component.size);
+		buffer.writeMessageField(kVideoBufferInfoComponents, plane);
+	}
+
+	ProtoWriter capture;
+	capture.writeVarintField(kCaptureSourceHandle, sourceHandle);
+	capture.writeMessageField(kCaptureBuffer, buffer);
+	capture.writeVarintField(
+		kCaptureTimestampUs,
+		static_cast<std::uint64_t>(frame.timestampUs));
+	capture.writeVarintField(kCaptureRotation, kVideoRotation0);
+	return WrapFfiRequest(kFfiRequestCaptureVideoFrame, capture);
+}
+
+bool DecodeLiveKitCaptureVideoFrameResponse(
+		const std::vector<std::uint8_t> &response) {
+	return FindMessage(response, kFfiResponseCaptureVideoFrame).has_value();
+}
+
+std::vector<std::uint8_t> EncodeLiveKitRemotePublicationQualityRequest(
+		std::uint64_t publicationHandle,
+		LiveKitVideoQuality quality) {
+	ProtoWriter request;
+	request.writeVarintField(kRemoteQualityPublicationHandle, publicationHandle);
+	request.writeVarintField(
+		kRemoteQualityQuality,
+		static_cast<std::uint64_t>(quality));
+	return WrapFfiRequest(kFfiRequestRemotePublicationQuality, request);
+}
+
+bool DecodeLiveKitRemotePublicationQualityResponse(
+		const std::vector<std::uint8_t> &response) {
+	return FindMessage(response, kFfiResponseRemotePublicationQuality).has_value();
 }
 
 std::vector<std::uint8_t> EncodeLiveKitCreateVideoTrackRequest(

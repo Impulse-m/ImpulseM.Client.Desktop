@@ -19,6 +19,14 @@ struct LiveKitRoomOptions final {
 enum class LiveKitTrackSource : std::uint8_t {
 	Camera = 1,
 	Microphone = 2,
+	ScreenShare = 3,
+};
+
+// The VideoQuality of a remote video publication (livekit-ffi room protocol).
+enum class LiveKitVideoQuality : std::uint8_t {
+	Low = 0,
+	Medium = 1,
+	High = 2,
 };
 
 // E2EE options of a room, as the shared-key mode of the library takes them.
@@ -44,6 +52,8 @@ enum class LiveKitEventKind : std::uint8_t {
 	VideoFrame,
 	RoomDisconnected,
 	EncryptionStateChanged,
+	TrackPublished,
+	TrackUnpublished,
 };
 
 // The EncryptionState of an E2EE state change (livekit-ffi e2ee.proto). Unknown
@@ -67,6 +77,16 @@ struct LiveKitVideoComponent final {
 	std::uint32_t size = 0;
 };
 
+// One I420 frame that the adapter pushes into a native video source. The data
+// pointers of the components are read by the library during the synchronous
+// capture request only.
+struct LiveKitCaptureFrame final {
+	std::uint32_t width = 0;
+	std::uint32_t height = 0;
+	std::int64_t timestampUs = 0;
+	std::vector<LiveKitVideoComponent> components;
+};
+
 // The buffer of a received video frame, as the library reports it. The type is
 // the VideoBufferType value; the adapter accepts I420 only.
 struct LiveKitVideoBuffer final {
@@ -88,6 +108,10 @@ struct LiveKitEvent final {
 	std::string error;
 	std::optional<std::uint64_t> roomHandle;
 	std::optional<std::uint64_t> localParticipantHandle;
+
+	// TrackPublished of a remote participant. The handle is set on a publish
+	// only and is owned by the adapter; the sid and the kind come from the
+	// publication info. TrackUnpublished names the publication by trackSid.
 	std::optional<std::uint64_t> publicationHandle;
 
 	// TrackSubscribed and TrackUnsubscribed. The handle is set on a subscribe
@@ -135,16 +159,42 @@ struct LiveKitHandleResponse final {
 
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioRequest();
 
+// The audio processing of the platform audio is set with the source: echo
+// cancellation and gain control are on, noise suppression follows the argument.
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioSourceRequest(
-	std::uint64_t platformAudioHandle);
+	std::uint64_t platformAudioHandle,
+	bool noiseSuppression);
 
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitCreateAudioTrackRequest(
 	const std::string &name,
 	std::uint64_t sourceHandle);
 
+// A screencast source is marked as screen content, so the encoder favours
+// detail over frame rate.
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitNewVideoSourceRequest(
 	std::uint32_t width,
-	std::uint32_t height);
+	std::uint32_t height,
+	bool screencast);
+
+// Pushes one I420 frame into a native video source. The request is synchronous;
+// the library copies the planes before it returns.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitCaptureVideoFrameRequest(
+	std::uint64_t sourceHandle,
+	const LiveKitCaptureFrame &frame);
+
+// Returns true when the response carries the CaptureVideoFrameResponse.
+[[nodiscard]] bool DecodeLiveKitCaptureVideoFrameResponse(
+	const std::vector<std::uint8_t> &response);
+
+// Sets the simulcast layer that the library subscribes to for a remote video
+// publication.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitRemotePublicationQualityRequest(
+	std::uint64_t publicationHandle,
+	LiveKitVideoQuality quality);
+
+// Returns true when the response carries the SetRemoteTrackPublicationQualityResponse.
+[[nodiscard]] bool DecodeLiveKitRemotePublicationQualityResponse(
+	const std::vector<std::uint8_t> &response);
 
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitCreateVideoTrackRequest(
 	const std::string &name,

@@ -24,6 +24,14 @@ struct LiveKitRemoteTrack final {
 	std::optional<std::uint64_t> streamHandle;
 };
 
+// A remote publication of the room, kept by its sid. The handle is owned by the
+// adapter until the publication is unpublished or the room is released.
+struct LiveKitRemotePublication final {
+	std::string participantIdentity;
+	LiveKitTrackKind kind = LiveKitTrackKind::Unknown;
+	std::uint64_t handle = 0;
+};
+
 namespace {
 
 // FfiResponse field numbers of the requests the adapter sends (livekit-ffi
@@ -40,6 +48,7 @@ constexpr std::uint32_t kResponseNewPlatformAudio = 76;
 
 constexpr const char *kMicrophoneName = "microphone";
 constexpr const char *kCameraName = "camera";
+constexpr const char *kScreenShareName = "screen";
 
 // Error texts are fixed. SDK messages can contain the authenticated WebSocket
 // URL and are never forwarded.
@@ -179,6 +188,19 @@ void DispatchTrackUnsubscribed(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event);
 
+void DispatchTrackPublished(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event);
+
+void DispatchTrackUnpublished(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event);
+
+bool RequestRemoteQuality(
+		LiveKitAdapterShared &state,
+		std::uint64_t publicationHandle,
+		LiveKitVideoQuality quality);
+
 void DispatchVideoFrame(
 		LiveKitAdapterShared &state,
 		std::uint64_t streamHandle,
@@ -198,14 +220,18 @@ struct LiveKitAdapterShared final {
 	bool disconnectRequested = false;
 	bool microphoneRequested = false;
 	bool cameraRequested = false;
+	bool screenRequested = false;
 	bool microphoneMuted = true;
 	bool cameraEnabled = true;
+	bool noiseSuppression = true;
 	std::vector<std::uint8_t> sharedKey;
 	LiveKitVideoSink *videoSink = nullptr;
 	std::optional<std::uint64_t> connectAsyncId;
 	std::optional<std::uint64_t> disconnectAsyncId;
 	std::map<std::uint64_t, LiveKitPublishKind> publishAsyncIds;
 	std::map<std::string, LiveKitRemoteTrack> remoteTracks;
+	std::map<std::string, LiveKitRemotePublication> remotePublications;
+	std::map<std::string, LiveKitVideoQuality> videoQualities;
 	std::optional<std::uint64_t> roomHandle;
 	std::optional<std::uint64_t> localParticipantHandle;
 	std::optional<std::uint64_t> platformAudioHandle;
@@ -213,6 +239,8 @@ struct LiveKitAdapterShared final {
 	std::optional<std::uint64_t> audioTrackHandle;
 	std::optional<std::uint64_t> videoSourceHandle;
 	std::optional<std::uint64_t> videoTrackHandle;
+	std::optional<std::uint64_t> screenSourceHandle;
+	std::optional<std::uint64_t> screenTrackHandle;
 	std::vector<std::uint64_t> publicationHandles;
 };
 
@@ -328,7 +356,8 @@ bool LiveKitAdapter::publishMicrophone() {
 	state.audioSourceHandle = RequestHandle(
 		state,
 		EncodeLiveKitNewPlatformAudioSourceRequest(
-			*state.platformAudioHandle),
+			*state.platformAudioHandle,
+			state.noiseSuppression),
 		kResponseNewAudioSource);
 	if (!state.audioSourceHandle) {
 		FailWith(state, kPublishFailed);
@@ -367,7 +396,7 @@ bool LiveKitAdapter::publishCamera(std::uint32_t width, std::uint32_t height) {
 	state.cameraRequested = true;
 	state.videoSourceHandle = RequestHandle(
 		state,
-		EncodeLiveKitNewVideoSourceRequest(width, height),
+		EncodeLiveKitNewVideoSourceRequest(width, height, false),
 		kResponseNewVideoSource);
 	if (!state.videoSourceHandle) {
 		FailWith(state, kPublishFailed);
@@ -396,6 +425,77 @@ bool LiveKitAdapter::publishCamera(std::uint32_t width, std::uint32_t height) {
 		LiveKitPublishKind::Camera);
 }
 
+bool LiveKitAdapter::publishScreenShare(
+		std::uint32_t width,
+		std::uint32_t height) {
+	LiveKitAdapterShared &state = *shared;
+	if (state.phase != Phase::Connected || state.screenRequested) {
+		return false;
+	}
+	state.screenRequested = true;
+	state.screenSourceHandle = RequestHandle(
+		state,
+		EncodeLiveKitNewVideoSourceRequest(width, height, true),
+		kResponseNewVideoSource);
+	if (!state.screenSourceHandle) {
+		FailWith(state, kPublishFailed);
+		return false;
+	}
+	state.screenTrackHandle = RequestHandle(
+		state,
+		EncodeLiveKitCreateVideoTrackRequest(
+			kScreenShareName,
+			*state.screenSourceHandle),
+		kResponseCreateVideoTrack);
+	if (!state.screenTrackHandle) {
+		FailWith(state, kPublishFailed);
+		return false;
+	}
+	return PublishTrack(
+		state,
+		*state.screenTrackHandle,
+		LiveKitTrackSource::ScreenShare,
+		LiveKitPublishKind::ScreenShare);
+}
+
+bool LiveKitAdapter::captureVideoFrame(
+		LiveKitPublishKind kind,
+		const LiveKitCapturedFrame &frame) {
+	LiveKitAdapterShared &state = *shared;
+	if (state.phase != Phase::Connected) {
+		return false;
+	}
+	std::optional<std::uint64_t> source;
+	if (kind == LiveKitPublishKind::Camera) {
+		source = state.videoSourceHandle;
+	} else if (kind == LiveKitPublishKind::ScreenShare) {
+		source = state.screenSourceHandle;
+	}
+	if (!source || !frame.width || !frame.height) {
+		return false;
+	}
+	LiveKitCaptureFrame request;
+	request.width = frame.width;
+	request.height = frame.height;
+	request.timestampUs = frame.timestampUs;
+	for (const LiveKitVideoPlane &plane : frame.planes) {
+		if (plane.bytes.empty() || plane.bytes.size() > kMaxPlaneBytes) {
+			return false;
+		}
+		LiveKitVideoComponent component;
+		component.dataPtr = static_cast<std::uint64_t>(
+			reinterpret_cast<std::uintptr_t>(plane.bytes.data()));
+		component.stride = plane.stride;
+		component.size = static_cast<std::uint32_t>(plane.bytes.size());
+		request.components.push_back(component);
+	}
+	// The request is synchronous, so the planes are read while the frame is
+	// still alive.
+	const std::optional<std::vector<std::uint8_t>> response = state.library->request(
+		EncodeLiveKitCaptureVideoFrameRequest(*source, request));
+	return response && DecodeLiveKitCaptureVideoFrameResponse(*response);
+}
+
 bool LiveKitAdapter::setMicrophoneMuted(bool muted) {
 	LiveKitAdapterShared &state = *shared;
 	state.microphoneMuted = muted;
@@ -414,6 +514,42 @@ bool LiveKitAdapter::setCameraEnabled(bool enabled) {
 		return true;
 	}
 	return SetTrackMuted(state, *state.videoTrackHandle, !enabled);
+}
+
+bool LiveKitAdapter::setNoiseSuppression(bool enabled) {
+	LiveKitAdapterShared &state = *shared;
+	// Without a microphone source the value is taken when it is created. With one,
+	// the library has no request that changes it, so the value is kept for the
+	// next microphone and the caller is told that it did not apply.
+	const bool applied = !state.audioSourceHandle
+		|| state.noiseSuppression == enabled;
+	state.noiseSuppression = enabled;
+	return applied;
+}
+
+bool LiveKitAdapter::setRemoteVideoQuality(
+		const std::string &participantIdentity,
+		LiveKitVideoQuality quality) {
+	LiveKitAdapterShared &state = *shared;
+	state.videoQualities[participantIdentity] = quality;
+	if (state.phase != Phase::Connected) {
+		// Applied to each video publication when it is published.
+		return true;
+	}
+	bool confirmed = true;
+	for (const std::pair<const std::string, LiveKitRemotePublication> &entry
+			: state.remotePublications) {
+		const LiveKitRemotePublication &publication = entry.second;
+		if (publication.kind != LiveKitTrackKind::Video
+			|| publication.participantIdentity != participantIdentity) {
+			continue;
+		}
+		confirmed = RequestRemoteQuality(
+			state,
+			publication.handle,
+			quality) && confirmed;
+	}
+	return confirmed;
 }
 
 void LiveKitAdapter::disconnect() {
@@ -471,10 +607,17 @@ void ReleaseAll(LiveKitAdapterShared &state) {
 		ReleaseRemoteTrack(state, entry.second);
 	}
 	state.remoteTracks.clear();
+	for (const std::pair<const std::string, LiveKitRemotePublication> &entry
+			: state.remotePublications) {
+		library.dropHandle(entry.second.handle);
+	}
+	state.remotePublications.clear();
 	for (const std::uint64_t handle : state.publicationHandles) {
 		library.dropHandle(handle);
 	}
 	state.publicationHandles.clear();
+	DropHandle(library, state.screenTrackHandle);
+	DropHandle(library, state.screenSourceHandle);
 	DropHandle(library, state.videoTrackHandle);
 	DropHandle(library, state.videoSourceHandle);
 	DropHandle(library, state.audioTrackHandle);
@@ -491,6 +634,7 @@ void ReleaseAll(LiveKitAdapterShared &state) {
 	state.disconnectRequested = false;
 	state.microphoneRequested = false;
 	state.cameraRequested = false;
+	state.screenRequested = false;
 }
 
 // Releases the stream and the handle of a remote track. The stream key is
@@ -839,6 +983,66 @@ void DispatchTrackUnsubscribed(
 	state.remoteTracks.erase(found);
 }
 
+// A remote publication is kept by its sid. A video publication of a participant
+// with a quality set gets that quality at once, as Android applies the quality
+// to each publication it refreshes.
+void DispatchTrackPublished(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	if (!event.publicationHandle) {
+		return;
+	}
+	// A publication that arrives outside a connected room is released at once.
+	if (state.phase != Phase::Connected || event.trackSid.empty()) {
+		state.library->dropHandle(*event.publicationHandle);
+		return;
+	}
+	const std::map<std::string, LiveKitRemotePublication>::iterator previous =
+		state.remotePublications.find(event.trackSid);
+	if (previous != state.remotePublications.end()) {
+		state.library->dropHandle(previous->second.handle);
+		state.remotePublications.erase(previous);
+	}
+	LiveKitRemotePublication publication;
+	publication.participantIdentity = event.participantIdentity;
+	publication.kind = event.trackKind;
+	publication.handle = *event.publicationHandle;
+	state.remotePublications.emplace(event.trackSid, publication);
+	if (publication.kind != LiveKitTrackKind::Video) {
+		return;
+	}
+	const std::map<std::string, LiveKitVideoQuality>::iterator quality =
+		state.videoQualities.find(publication.participantIdentity);
+	if (quality != state.videoQualities.end()) {
+		RequestRemoteQuality(state, publication.handle, quality->second);
+	}
+}
+
+void DispatchTrackUnpublished(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	const std::map<std::string, LiveKitRemotePublication>::iterator found =
+		state.remotePublications.find(event.trackSid);
+	if (found == state.remotePublications.end()) {
+		return;
+	}
+	state.library->dropHandle(found->second.handle);
+	state.remotePublications.erase(found);
+}
+
+bool RequestRemoteQuality(
+		LiveKitAdapterShared &state,
+		std::uint64_t publicationHandle,
+		LiveKitVideoQuality quality) {
+	const std::optional<std::vector<std::uint8_t>> response =
+		state.library->request(
+			EncodeLiveKitRemotePublicationQualityRequest(
+				publicationHandle,
+				quality));
+	return response
+		&& DecodeLiveKitRemotePublicationQualityResponse(*response);
+}
+
 void DispatchVideoFrame(
 		LiveKitAdapterShared &state,
 		std::uint64_t streamHandle,
@@ -872,6 +1076,10 @@ void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event) {
 		DispatchRoomDisconnected(state, event);
 	} else if (event.kind == LiveKitEventKind::EncryptionStateChanged) {
 		DispatchEncryptionState(state, event);
+	} else if (event.kind == LiveKitEventKind::TrackPublished) {
+		DispatchTrackPublished(state, event);
+	} else if (event.kind == LiveKitEventKind::TrackUnpublished) {
+		DispatchTrackUnpublished(state, event);
 	}
 }
 

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 
 #include "apiwrap.h"
+#include "core/impulse_features.h"
 #include "api/api_peer_colors.h"
 #include "api/api_updates.h"
 #include "api/api_user_privacy.h"
@@ -289,9 +290,10 @@ void Session::appConfigRefreshed() {
 	};
 
 #ifndef OS_MAC_STORE
-	_premiumPossible = !config.get<bool>(
+	const auto premiumLocked = config.get<bool>(
 		u"premium_purchase_blocked"_q,
-		true);
+		ImpulseFeatures::PremiumLockedDefault);
+	_premiumPossible = !ImpulseFeatures::premiumPurchaseBlocked(premiumLocked);
 #endif // OS_MAC_STORE
 
 	_messagePrimaryEditedDate = config.get<bool>(

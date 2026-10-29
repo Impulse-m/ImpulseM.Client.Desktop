@@ -554,6 +554,7 @@ void Session::addWindow(not_null<Window::SessionController*> controller) {
 	) | rpl::map([=](Dialogs::Key chat) {
 		return chat.peer();
 	}) | rpl::distinct_until_changed());
+	lanesSource->watchWindow(controller);
 }
 
 bool Session::uploadsInProgress() const {

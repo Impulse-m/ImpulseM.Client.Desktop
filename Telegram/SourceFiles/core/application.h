@@ -345,6 +345,7 @@ public:
 	void refreshGlobalProxy();
 	[[nodiscard]] std::optional<Impulse::ProxyRouting::HttpEndpoint>
 		impulseHttpEndpoint();
+	[[nodiscard]] bool impulseXrayRunning();
 	void refreshApplicationIcon();
 
 	void quitPreventFinished();

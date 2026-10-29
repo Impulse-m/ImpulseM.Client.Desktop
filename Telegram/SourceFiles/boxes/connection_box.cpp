@@ -70,6 +70,15 @@ namespace {
 
 constexpr auto kSaveSettingsDelayedTimeout = crl::time(1000);
 
+// Proxied calls need the loopback relay, which is not shipped yet. Until it is,
+// the calls toggle stays visible but disabled, so calls never go through the
+// proxy.
+constexpr auto kProxiedCallsRelayReady = false;
+
+[[nodiscard]] bool ProxiedCallsAvailable() {
+	return kProxiedCallsRelayReady && Core::App().impulseXrayRunning();
+}
+
 using ProxyData = MTP::ProxyData;
 
 struct TopButtonMenuState {
@@ -1306,7 +1315,11 @@ void ProxiesBox::setupContent() {
 
 	_proxyForCalls->entity()->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
-		_controller->setProxyForCalls(checked);
+		if (!_controller->setProxyForCalls(checked)) {
+			_proxyForCalls->entity()->setChecked(
+				!checked,
+				Ui::Checkbox::NotifyAboutChange::DontNotify);
+		}
 	}, _proxyForCalls->lifetime());
 	_proxyRotation->entity()->checkedChanges(
 	) | rpl::on_next([=](bool checked) {
@@ -1369,6 +1382,7 @@ void ProxiesBox::refreshProxyForCalls() {
 		(_proxySettings->current() == ProxyData::Settings::Enabled
 			&& _currentProxySupportsCallsId != 0),
 		anim::type::normal);
+	_proxyForCalls->entity()->setDisabled(!ProxiedCallsAvailable());
 }
 
 void ProxiesBox::refreshProxyRotation() {
@@ -2492,15 +2506,25 @@ bool ProxiesBoxController::setProxySettings(ProxyData::Settings value) {
 	return true;
 }
 
-void ProxiesBoxController::setProxyForCalls(bool enabled) {
+bool ProxiesBoxController::setProxyForCalls(bool enabled) {
 	if (_settings.useProxyForCalls() == enabled) {
-		return;
+		return true;
+	}
+	auto state = _settings.impulseProxyState();
+	if (enabled && !ProxiedCallsAvailable()) {
+		return false;
+	} else if (!enabled && !state.useForTransport) {
+		// At least one of the two transports stays on.
+		return false;
 	}
 	_settings.setUseProxyForCalls(enabled);
+	state.useForCalls = enabled;
+	_settings.setImpulseProxyState(std::move(state));
 	if (_settings.isEnabled() && _settings.selected().supportsCalls()) {
 		_settings.connectionTypeChangesNotify();
 	}
 	saveDelayed();
+	return true;
 }
 
 void ProxiesBoxController::setProxyRotationEnabled(bool enabled) {

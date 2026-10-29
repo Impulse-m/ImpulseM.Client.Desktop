@@ -91,7 +91,7 @@ public:
 	object_ptr<Ui::BoxContent> editItemBox(int id);
 	object_ptr<Ui::BoxContent> addNewItemBox();
 	bool setProxySettings(ProxyData::Settings value);
-	void setProxyForCalls(bool enabled);
+	bool setProxyForCalls(bool enabled);
 	void setProxyRotationEnabled(bool enabled);
 	void setProxyRotationTimeout(int value);
 	void setTryIPv6(bool enabled);

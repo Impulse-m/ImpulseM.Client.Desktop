@@ -1439,9 +1439,9 @@ win64:
     powershell -Command "if ((Get-FileHash -Algorithm SHA256 -Path ./libxray.zip).Hash.ToLower() -ne '8981854173f0b590a51c902a2664443aaf9ea95f6be5466b82daa3ee795f5cc0') { exit 1 }"
     powershell -Command "Expand-Archive -Force -Path ./libxray.zip -DestinationPath ./libxray"
     if not exist libxray\\libxray-windows-x64\\libXray.dll exit /b 1
-    if not exist ..\\xray mkdir ..\\xray
-    copy /Y libxray\\libxray-windows-x64\\libXray.dll ..\\xray\\ >nul
-    if not exist ..\\xray\\libXray.dll exit /b 1
+    if not exist xray mkdir xray
+    copy /Y libxray\\libxray-windows-x64\\libXray.dll xray\\ >nul
+    if not exist xray\\libXray.dll exit /b 1
     del libxray.zip
 """)
 

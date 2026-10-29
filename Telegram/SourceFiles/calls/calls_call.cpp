@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_group_common.h"
 #include "calls/calls_instance.h"
 #include "calls/calls_panel.h"
+#include "calls/livekit/livekit_call_instance.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "data/data_group_call.h"
@@ -36,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <tgcalls/Instance.h>
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QDir>
 
 #include <algorithm>
 
@@ -195,6 +198,12 @@ uint64 ComputeFingerprint(bytes::const_span authKey) {
 
 [[nodiscard]] QVector<MTPstring> CollectVersionsForApi() {
 	return QVector<MTPstring>{ MTP_string(kLiveKitLibraryVersion) };
+}
+
+[[nodiscard]] std::wstring LiveKitDllPath() {
+	return QDir::toNativeSeparators(
+		QCoreApplication::applicationDirPath()
+		+ u"/modules/x64/livekit/livekit_ffi.dll"_q).toStdWString();
 }
 
 [[nodiscard]] Webrtc::VideoState StartVideoState(bool enabled) {
@@ -1267,13 +1276,16 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 			}
 		}
 	}
-	_instance = tgcalls::Meta::Create(versionString, std::move(descriptor));
-	if (!_instance) {
-		LOG(("Call Error: Wrong library version: %1."
-			).arg(QString::fromUtf8(version)));
-		finish(FinishType::Failed);
-		return;
-	}
+	// The LiveKit instance takes the join parameters by value, so the bearer
+	// token leaves the call object here and is not kept after the connect.
+	_instance = std::make_unique<Impulse::LiveKitInstance>(
+		std::move(descriptor),
+		std::move(*liveKitJoin),
+		LiveKitDllPath(),
+		[](std::function<void()> task) {
+			crl::on_main(std::move(task));
+		});
+	liveKitJoin.reset();
 
 	const auto raw = _instance.get();
 	if (_muted.current()) {

@@ -32,8 +32,6 @@ inline constexpr auto kPingSequential = std::string_view("sequential");
 inline constexpr auto kPingDefaultUrl = std::string_view("https://www.gstatic.com/generate_204");
 inline constexpr auto kHttpsPrefix = std::string_view("https://");
 
-inline constexpr auto kSecurityNone = std::string_view("none");
-
 inline constexpr int kDefaultMuxConcurrency = 8;
 inline constexpr int kDefaultPingTimeoutSeconds = 5;
 inline constexpr int kDefaultIntervalHours = 24;
@@ -50,10 +48,6 @@ inline constexpr auto kFingerprints = std::array<std::string_view, 10>{
 	"random",
 	"randomized",
 };
-
-[[nodiscard]] bool IsKnownSecurity(std::string_view value) {
-	return value == "none" || value == "tls" || value == "reality";
-}
 
 [[nodiscard]] bool IsFingerprint(std::string_view value) {
 	for (const auto candidate : kFingerprints) {
@@ -280,9 +274,7 @@ void RepairToggles(
 	server.host = *host;
 	server.port = static_cast<int>(*port);
 	server.network = *network;
-	server.security = IsKnownSecurity(*security)
-		? *security
-		: std::string(kSecurityNone);
+	server.security = *security;
 	server.outbound = *outbound;
 	server.shareLink = ReadOptionalString(item, "shareLink");
 	return server;

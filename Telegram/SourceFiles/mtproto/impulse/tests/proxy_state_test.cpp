@@ -120,7 +120,7 @@ IMPULSE_TEST(ProxyStateSelectedIdAbsentStaysAbsent) {
 	IMPULSE_CHECK(!Impulse::ProxyState::Decode(Impulse::ProxyState::Encode(Impulse::ProxyState::State())).selectedId.has_value());
 }
 
-IMPULSE_TEST(ProxyStateUnknownServerSecurityReadsAsNone) {
+IMPULSE_TEST(ProxyStateServerSecurityIsReadAsStored) {
 	const auto state = Impulse::ProxyState::Decode(
 		R"({"manual":[)"
 		R"({"id":"a","name":"A","host":"h","port":1,"network":"ws","security":"xtls","outbound":"{}"},)"
@@ -129,7 +129,7 @@ IMPULSE_TEST(ProxyStateUnknownServerSecurityReadsAsNone) {
 	if (state.manual.size() != 2) {
 		return;
 	}
-	IMPULSE_CHECK(state.manual[0].security == "none");
+	IMPULSE_CHECK(state.manual[0].security == "xtls");
 	IMPULSE_CHECK(state.manual[1].security == "tls");
 }
 

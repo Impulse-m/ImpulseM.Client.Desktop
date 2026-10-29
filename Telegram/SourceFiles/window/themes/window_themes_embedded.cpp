@@ -359,7 +359,7 @@ std::vector<EmbeddedScheme> EmbeddedThemes() {
 			qColor("ffffff"),
 			name(tr::lng_settings_theme_classic),
 			QString(),
-			qColor("40a7e3")
+			qColor("2085df")
 		},
 		EmbeddedScheme{
 			EmbeddedType::DayBlue,
@@ -370,7 +370,7 @@ std::vector<EmbeddedScheme> EmbeddedThemes() {
 			qColor("ffffff"),
 			name(tr::lng_settings_theme_day),
 			":/gui/day-blue.tdesktop-theme",
-			qColor("40a7e3")
+			qColor("2085df")
 		},
 		EmbeddedScheme{
 			EmbeddedType::Night,
@@ -381,7 +381,7 @@ std::vector<EmbeddedScheme> EmbeddedThemes() {
 			qColor("5ca7d4"),
 			name(tr::lng_settings_theme_tinted),
 			":/gui/night.tdesktop-theme",
-			qColor("5288c1")
+			qColor("58aeee")
 		},
 		EmbeddedScheme{
 			EmbeddedType::NightGreen,
@@ -404,7 +404,7 @@ std::vector<QColor> DefaultAccentColors(EmbeddedType type) {
 	switch (type) {
 	case EmbeddedType::DayBlue:
 		return {
-			qColor("45bce7"),
+			qColor("2085df"),
 			qColor("52b440"),
 			qColor("d46c99"),
 			qColor("df8a49"),
@@ -415,7 +415,7 @@ std::vector<QColor> DefaultAccentColors(EmbeddedType type) {
 		};
 	case EmbeddedType::Default:
 		return {
-			qColor("45bce7"),
+			qColor("2085df"),
 			qColor("52b440"),
 			qColor("d46c99"),
 			qColor("df8a49"),
@@ -426,7 +426,7 @@ std::vector<QColor> DefaultAccentColors(EmbeddedType type) {
 		};
 	case EmbeddedType::Night:
 		return {
-			qColor("58bfe8"),
+			qColor("58aeee"),
 			qColor("466f42"),
 			qColor("aa6084"),
 			qColor("a46d3c"),

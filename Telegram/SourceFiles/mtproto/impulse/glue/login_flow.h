@@ -6,12 +6,12 @@
 // identity. Qt-free. Owner thread only.
 #pragma once
 
+#include "mtproto/impulse/core/login_user_id.h"
 #include "mtproto/impulse/core/transcoder.h"
 #include "mtproto/impulse/glue/token_manager.h"
 
 #include <cstdint>
 #include <functional>
-#include <optional>
 #include <span>
 #include <string>
 
@@ -21,12 +21,6 @@ namespace Impulse {
 // without its "i:" prefix, which names the identity:{id} lane. Empty when the
 // token is empty or is not a connection identity.
 [[nodiscard]] std::string IdentityLaneId(const std::string &identityToken);
-
-// The user id of an auth.authorization result of the transcoder, read from
-// its TL bytes. An auth.loginTokenSuccess result is read through its
-// authorization. Nullopt when the result is not an authorization with a user.
-[[nodiscard]] std::optional<std::int64_t> AuthorizationUserId(
-	std::span<const std::uint8_t> tl);
 
 class LoginFlow final {
 public:

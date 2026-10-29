@@ -85,7 +85,9 @@ public:
 
 	// Fails the calls that need a login with -1000, and clears the tokens when
 	// resetKeys is set or a user was bound. The media pool is retired then, as
-	// Android cleanup does. The account lanes are dropped with the user.
+	// Android cleanup does. The account lanes are dropped with the user. With
+	// resetKeys the connection identity is discarded as well, in memory and on
+	// disk.
 	void cleanup(bool resetKeys);
 
 	// Publishes the media endpoint of thisDc from the media_only options of the

@@ -450,6 +450,12 @@ void ImpulseConnection::cleanup(bool resetKeys) {
 			mediaFleet->sessionChanged();
 		}
 	}
+	if (resetKeys) {
+		// A sign-out ends the connection identity too: it is forgotten in
+		// memory and its file is removed.
+		identity->discard();
+		refreshIdentityLane();
+	}
 }
 
 void ImpulseConnection::setMediaOptions(

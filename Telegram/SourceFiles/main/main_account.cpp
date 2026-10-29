@@ -234,7 +234,15 @@ void Account::destroySession(DestroyReason reason) {
 	_sessionUserId = 0;
 	_sessionUserSerialized = {};
 	if (reason == DestroyReason::LoggedOut) {
-		// Sign-out discards the session tokens and the identity.
+		// Sign-out discards the session tokens and the identity. The transport
+		// clears its tokens and its connection identity (in memory and on
+		// disk) while the session still exists, so the login calls fail first.
+		if (_mtp) {
+			Impulse::ImpulseConnection *const connection = _mtp->impulse();
+			if (connection) {
+				connection->cleanup(true);
+			}
+		}
 		impulseSession = {};
 		impulseIdentity = {};
 	}

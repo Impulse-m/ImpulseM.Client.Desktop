@@ -1,0 +1,145 @@
+{
+  "constructors": [
+    {
+      "arm": null,
+      "capture": [],
+      "id": 3162085175,
+      "params": [],
+      "predicate": "boolFalse",
+      "proto": null,
+      "type": "Bool"
+    },
+    {
+      "arm": null,
+      "capture": [],
+      "id": 2574415285,
+      "params": [],
+      "predicate": "boolTrue",
+      "proto": null,
+      "type": "Bool"
+    },
+    {
+      "arm": 1,
+      "capture": [],
+      "id": 1498486562,
+      "params": [
+        {
+          "field": 1,
+          "kind": "long",
+          "name": "user_id"
+        }
+      ],
+      "predicate": "peerUser",
+      "proto": "PeerUser",
+      "type": "Peer"
+    },
+    {
+      "arm": null,
+      "capture": [],
+      "id": 1780335806,
+      "params": [
+        {
+          "kind": "flags",
+          "name": "flags"
+        },
+        {
+          "field": 1,
+          "kind": "long",
+          "name": "client_id"
+        },
+        {
+          "field": 2,
+          "kind": "string",
+          "name": "phone"
+        },
+        {
+          "field": 3,
+          "kind": "string",
+          "name": "first_name"
+        },
+        {
+          "field": 4,
+          "kind": "string",
+          "name": "last_name"
+        },
+        {
+          "field": 5,
+          "flag": [
+            "flags",
+            0
+          ],
+          "kind": "object",
+          "name": "note",
+          "type": "TextWithEntities"
+        }
+      ],
+      "predicate": "inputPhoneContact",
+      "proto": "InputContact",
+      "type": "InputContact"
+    },
+    {
+      "arm": 1,
+      "capture": [
+        {
+          "field": 6,
+          "name": "session_token"
+        },
+        {
+          "field": 7,
+          "name": "refresh_token"
+        }
+      ],
+      "id": 782418132,
+      "params": [
+        {
+          "kind": "flags",
+          "name": "flags"
+        },
+        {
+          "field": 3,
+          "flag": [
+            "flags",
+            0
+          ],
+          "kind": "int",
+          "name": "tmp_sessions"
+        },
+        {
+          "field": 5,
+          "kind": "object",
+          "name": "user",
+          "type": "User"
+        }
+      ],
+      "predicate": "auth.authorization",
+      "proto": "AuthAuthorizationValue",
+      "type": "auth.Authorization"
+    }
+  ],
+  "layer": 232,
+  "methods": [
+    {
+      "id": 3304659051,
+      "method": "help.getConfig",
+      "params": [],
+      "path": "/v1.help.Help/GetConfig",
+      "result": {
+        "kind": "object",
+        "type": "Config"
+      }
+    }
+  ],
+  "wrappers": {
+    "initConnection": 3251461801,
+    "invokeAfterMsg": 3416209197,
+    "invokeAfterMsgs": 1036301552,
+    "invokeWithApnsSecret": 229528824,
+    "invokeWithBusinessConnection": 3710427022,
+    "invokeWithGooglePlayIntegrity": 502868356,
+    "invokeWithLayer": 3667594509,
+    "invokeWithMessagesRange": 911373810,
+    "invokeWithReCaptcha": 2914717588,
+    "invokeWithTakeout": 2896821550,
+    "invokeWithoutUpdates": 3214170551
+  }
+}

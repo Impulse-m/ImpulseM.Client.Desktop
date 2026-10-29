@@ -159,6 +159,10 @@ constexpr std::uint32_t Base64UrlBufferMask = 0xFFFF;
 
 } // namespace
 
+std::optional<TokenClaims> readTokenClaims(const std::string &token) {
+	return readClaims(token);
+}
+
 IdentityManager::IdentityManager(IdentityManagerDependencies dependencies)
 	: store(dependencies.store)
 	, mintCall(std::move(dependencies.mint))

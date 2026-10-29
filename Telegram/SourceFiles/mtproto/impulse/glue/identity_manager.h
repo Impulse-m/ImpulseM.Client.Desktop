@@ -18,6 +18,11 @@
 
 namespace Impulse {
 
+// The claims of a JWT, read without checking the signature. Nullopt when the
+// token is not a JWT whose payload is a JSON object with a string sub.
+[[nodiscard]] std::optional<TokenClaims> readTokenClaims(
+	const std::string &token);
+
 class IdentityListener {
 public:
 	virtual ~IdentityListener() = default;

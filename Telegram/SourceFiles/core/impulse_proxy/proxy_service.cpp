@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -441,10 +442,16 @@ void ImpulseProxyService::refreshRoute() {
 void ImpulseProxyService::armSubscriptionTimers(
 		const ProxyState::State &state) {
 	constexpr crl::time kMillisInHour = crl::time(60) * 60 * 1000;
+	// The interval comes from the subscription server, and base::Timer
+	// accepts at most INT_MAX milliseconds.
+	constexpr int kMaxTimerHours
+		= int(std::numeric_limits<int>::max() / kMillisInHour);
 	std::map<std::string, SubscriptionTimer> next;
 	for (const ProxyState::Subscription &subscription
 			: state.subscriptions) {
-		const int hours = subscription.meta.updateIntervalHours;
+		const int hours = std::min(
+			subscription.meta.updateIntervalHours,
+			kMaxTimerHours);
 		if (hours < 1) {
 			continue;
 		}

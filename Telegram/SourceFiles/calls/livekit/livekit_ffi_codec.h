@@ -42,6 +42,21 @@ enum class LiveKitEventKind : std::uint8_t {
 	TrackSubscribed,
 	TrackUnsubscribed,
 	VideoFrame,
+	RoomDisconnected,
+	EncryptionStateChanged,
+};
+
+// The EncryptionState of an E2EE state change (livekit-ffi e2ee.proto). Unknown
+// holds every value the library does not define.
+enum class LiveKitEncryptionState : std::uint8_t {
+	Unknown,
+	New,
+	Ok,
+	EncryptionFailed,
+	DecryptionFailed,
+	MissingKey,
+	KeyRatcheted,
+	InternalError,
 };
 
 // One plane of an I420 buffer that the library decoded for a video frame. The
@@ -65,7 +80,8 @@ struct LiveKitVideoBuffer final {
 
 // The decoded part of an FfiEvent that the adapter needs: the async callbacks
 // of connect, publish and disconnect requests, the track subscriptions of the
-// room, and the frames of a video stream.
+// room, the room drop and E2EE state of the room, and the frames of a video
+// stream.
 struct LiveKitEvent final {
 	LiveKitEventKind kind = LiveKitEventKind::Unknown;
 	std::uint64_t asyncId = 0;
@@ -75,11 +91,19 @@ struct LiveKitEvent final {
 	std::optional<std::uint64_t> publicationHandle;
 
 	// TrackSubscribed and TrackUnsubscribed. The handle is set on a subscribe
-	// only; the sid identifies the track on both events.
+	// only; the sid identifies the track on both events. EncryptionStateChanged
+	// names the participant whose state changed in participantIdentity.
 	std::string participantIdentity;
 	std::string trackSid;
 	std::optional<std::uint64_t> trackHandle;
 	LiveKitTrackKind trackKind = LiveKitTrackKind::Unknown;
+
+	// RoomDisconnected: true when this client left the room, which is the
+	// disconnect the adapter asked for. Any other reason is a server-side drop.
+	bool clientInitiated = false;
+
+	// EncryptionStateChanged: the state the library reports for the track.
+	LiveKitEncryptionState encryptionState = LiveKitEncryptionState::Unknown;
 
 	// VideoFrame: the video stream that delivered the frame and its buffer.
 	std::optional<std::uint64_t> streamHandle;

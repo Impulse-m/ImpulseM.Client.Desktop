@@ -58,6 +58,10 @@ class LiveKitAdapterDelegate {
 public:
 	virtual void liveKitConnected() = 0;
 	virtual void liveKitPublished(LiveKitPublishKind kind) = 0;
+
+	// Fires when the room fails: a connect or publish fails, the room is
+	// dropped by the server, or a track reports an E2EE failure state. The
+	// room is released before the call.
 	virtual void liveKitFailed(const std::string &message) = 0;
 	virtual void liveKitDisconnected() = 0;
 

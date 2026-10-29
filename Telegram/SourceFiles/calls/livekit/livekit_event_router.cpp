@@ -5,6 +5,10 @@
 
 namespace Impulse {
 
+LiveKitEventRouter::LiveKitEventRouter(ReleaseHandle releaseHandle)
+: releaseHandle(std::move(releaseHandle)) {
+}
+
 LiveKitEventRouter::RouteId LiveKitEventRouter::addRoute(Route route) {
 	std::lock_guard<std::mutex> lock(mutex);
 	const RouteId id = nextRouteId++;
@@ -87,6 +91,15 @@ void LiveKitEventRouter::dispatch(const LiveKitEvent &event) {
 	}
 	if (route) {
 		route(event);
+		return;
+	}
+	// The frame of a stream that no route owns is dropped, and its buffer is
+	// released here, since no route will release it.
+	if (releaseHandle
+		&& event.kind == LiveKitEventKind::VideoFrame
+		&& event.videoBuffer
+		&& event.videoBuffer->bufferHandle) {
+		releaseHandle(event.videoBuffer->bufferHandle);
 	}
 }
 

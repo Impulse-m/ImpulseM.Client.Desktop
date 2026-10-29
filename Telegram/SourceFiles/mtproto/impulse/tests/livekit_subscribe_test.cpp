@@ -93,8 +93,58 @@ constexpr std::uint32_t kStreamNormalizeStride = 4;
 // ReadyForRoomEventRequest field.
 constexpr std::uint32_t kReadyRoomHandle = 1;
 
+// DisconnectRequest field of the request_async_id, and the request field.
+constexpr std::uint32_t kRequestDisconnect = 4;
+constexpr std::uint32_t kDisconnectAsyncId = 2;
+
+// The request_async_id of a connect or disconnect request.
+[[nodiscard]] std::optional<std::uint64_t> RequestAsyncId(
+		std::span<const std::uint8_t> data) {
+	Impulse::ProtoReader outer(data);
+	while (outer.next()) {
+		const std::uint32_t field = outer.field();
+		std::uint32_t asyncField = 0;
+		if (field == kRequestConnect) {
+			asyncField = 4;
+		} else if (field == kRequestDisconnect) {
+			asyncField = kDisconnectAsyncId;
+		} else {
+			outer.skip();
+			continue;
+		}
+		const std::span<const std::uint8_t> payload = outer.readBytes();
+		Impulse::ProtoReader inner(payload);
+		while (inner.next()) {
+			if (inner.field() == asyncField) {
+				return inner.readVarint();
+			}
+			inner.skip();
+		}
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+// The async id of the request at the index, or 0 when there is no such request.
+[[nodiscard]] std::uint64_t AsyncIdAt(
+		const std::vector<std::vector<std::uint8_t>> &sent,
+		std::size_t index) {
+	if (index >= sent.size()) {
+		return 0;
+	}
+	return RequestAsyncId(sent[index]).value_or(0);
+}
+
+// The outer field number of an encoded response.
+[[nodiscard]] std::uint32_t ResponseField(
+		const std::vector<std::uint8_t> &response) {
+	Impulse::ProtoReader reader(response);
+	return reader.next() ? reader.field() : 0;
+}
+
 // Stands in for the library. It records every request and answers the scripted
-// responses in order. It keeps its own event router, as the library does.
+// responses in order. It keeps its own event router, as the library does. An
+// async request is answered with its own request_async_id, as the library does.
 class FakeFfi final : public Impulse::LiveKitFfi {
 public:
 	bool loaded() const override {
@@ -109,6 +159,14 @@ public:
 		}
 		std::vector<std::uint8_t> next = responses.front();
 		responses.erase(responses.begin());
+		const std::optional<std::uint64_t> requestId = RequestAsyncId(data);
+		if (requestId) {
+			Impulse::ProtoWriter inner;
+			inner.writeVarintField(kAsyncId, *requestId);
+			Impulse::ProtoWriter outer;
+			outer.writeMessageField(ResponseField(next), inner);
+			next = outer.takeBytes();
+		}
 		return next;
 	}
 
@@ -547,7 +605,7 @@ IMPULSE_TEST(LiveKitSubscribedVideoReachesSinkAndReleasesOnUnsubscribe) {
 	Impulse::LiveKitAdapter adapter(fake, delegate, RunNow);
 	adapter.setVideoSink(&sink);
 	IMPULSE_CHECK(adapter.connect("wss://room", "token"));
-	fake->router.dispatch(ConnectEvent(101, 11, 12));
+	fake->router.dispatch(ConnectEvent(AsyncIdAt(fake->sent, 0), 11, 12));
 	IMPULSE_CHECK(delegate.connected == 1);
 	IMPULSE_CHECK(fake->sent.size() == 3);
 
@@ -606,7 +664,7 @@ IMPULSE_TEST(LiveKitSubscribedVideoReachesSinkAndReleasesOnUnsubscribe) {
 	// Disconnect releases the subscribed audio track as well.
 	adapter.disconnect();
 	IMPULSE_CHECK(fake->sent.size() == 5);
-	fake->router.dispatch(DisconnectEvent(303));
+	fake->router.dispatch(DisconnectEvent(AsyncIdAt(fake->sent, 4)));
 	IMPULSE_CHECK(delegate.disconnected == 1);
 	IMPULSE_CHECK(std::find(
 		fake->dropped.begin(),
@@ -627,7 +685,7 @@ IMPULSE_TEST(LiveKitRemoveSinkStopsFrames) {
 	Impulse::LiveKitAdapter adapter(fake, delegate, RunNow);
 	adapter.setVideoSink(&sink);
 	IMPULSE_CHECK(adapter.connect("wss://room", "token"));
-	fake->router.dispatch(ConnectEvent(101, 11, 12));
+	fake->router.dispatch(ConnectEvent(AsyncIdAt(fake->sent, 0), 11, 12));
 	fake->router.dispatch(DecodeEvent(
 		SubscribedEventBytes(11, "u42", "TR_video", 55, kTrackKindVideo)));
 

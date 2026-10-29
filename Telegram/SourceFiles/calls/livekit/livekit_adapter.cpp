@@ -4,6 +4,7 @@
 #include "calls/livekit/livekit_ffi_codec.h"
 #include "calls/livekit/livekit_ffi_loader.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -45,6 +46,13 @@ constexpr const char *kCameraName = "camera";
 constexpr const char *kConnectFailed = "LiveKit connection failed";
 constexpr const char *kPublishFailed = "LiveKit publish failed";
 constexpr const char *kMuteFailed = "LiveKit mute failed";
+constexpr const char *kConnectionLost = "LiveKit disconnected";
+constexpr const char *kEncryptionFailed = "LiveKit media encryption failed";
+
+// The async ids of the requests that the adapter sends carry the top bit. The
+// library counts its own ids up from 1, and the router keys handles and async
+// ids in one map, so the two sets never meet.
+constexpr std::uint64_t kClientAsyncIdFlag = std::uint64_t(1) << 63;
 
 // VideoBufferType.I420 and the three planes of an I420 buffer.
 constexpr std::uint32_t kBufferTypeI420 = 5;
@@ -68,6 +76,35 @@ enum class Phase : std::uint8_t {
 	Disconnecting,
 	Failed,
 };
+
+// Returns the async id for the next request. The id goes into the request, so
+// its route key is registered before the library can answer.
+[[nodiscard]] std::uint64_t NextRequestAsyncId() {
+	static std::atomic<std::uint64_t> last{0};
+	return kClientAsyncIdFlag | (last.fetch_add(1) + 1);
+}
+
+// True when the library answered the request with the async id the adapter
+// sent. The library uses the id of the request as the id of the response.
+[[nodiscard]] bool RequestAccepted(
+		const std::optional<std::vector<std::uint8_t>> &response,
+		std::uint32_t responseField,
+		std::uint64_t asyncId) {
+	if (!response) {
+		return false;
+	}
+	const std::optional<std::uint64_t> echoed = DecodeLiveKitAsyncId(
+		*response,
+		responseField);
+	return echoed && *echoed == asyncId;
+}
+
+[[nodiscard]] bool IsEncryptionFailure(LiveKitEncryptionState state) {
+	return state == LiveKitEncryptionState::EncryptionFailed
+		|| state == LiveKitEncryptionState::DecryptionFailed
+		|| state == LiveKitEncryptionState::MissingKey
+		|| state == LiveKitEncryptionState::InternalError;
+}
 
 void DropHandle(
 		LiveKitFfi &library,
@@ -251,23 +288,20 @@ bool LiveKitAdapter::connect(const std::string &url, const std::string &token) {
 		options.sharedKey = state.sharedKey;
 		encryption = std::move(options);
 	}
+	const std::uint64_t asyncId = NextRequestAsyncId();
+	AddKey(state, asyncId);
 	const std::optional<std::vector<std::uint8_t>> response = ffi->request(
 		EncodeLiveKitConnectRequest(
 			url,
 			token,
 			DefaultRoomOptions(),
-			std::nullopt,
+			asyncId,
 			encryption));
-	std::optional<std::uint64_t> asyncId;
-	if (response) {
-		asyncId = DecodeLiveKitAsyncId(*response, kResponseConnect);
-	}
-	if (!asyncId) {
+	if (!RequestAccepted(response, kResponseConnect, asyncId)) {
 		FailWith(state, kConnectFailed);
 		return false;
 	}
 	state.connectAsyncId = asyncId;
-	AddKey(state, *asyncId);
 	state.phase = Phase::Connecting;
 	return true;
 }
@@ -513,19 +547,16 @@ void FinishDisconnected(LiveKitAdapterShared &state) {
 }
 
 void SendDisconnect(LiveKitAdapterShared &state) {
+	const std::uint64_t asyncId = NextRequestAsyncId();
+	AddKey(state, asyncId);
 	const std::optional<std::vector<std::uint8_t>> response =
 		state.library->request(
-			EncodeLiveKitDisconnectRequest(*state.roomHandle, std::nullopt));
-	std::optional<std::uint64_t> asyncId;
-	if (response) {
-		asyncId = DecodeLiveKitAsyncId(*response, kResponseDisconnect);
-	}
-	if (!asyncId) {
+			EncodeLiveKitDisconnectRequest(*state.roomHandle, asyncId));
+	if (!RequestAccepted(response, kResponseDisconnect, asyncId)) {
 		FinishDisconnected(state);
 		return;
 	}
 	state.disconnectAsyncId = asyncId;
-	AddKey(state, *asyncId);
 	state.phase = Phase::Disconnecting;
 }
 
@@ -560,23 +591,20 @@ bool PublishTrack(
 		std::uint64_t trackHandle,
 		LiveKitTrackSource source,
 		LiveKitPublishKind kind) {
+	const std::uint64_t asyncId = NextRequestAsyncId();
+	AddKey(state, asyncId);
 	const std::optional<std::vector<std::uint8_t>> response =
 		state.library->request(
 			EncodeLiveKitPublishTrackRequest(
 				*state.localParticipantHandle,
 				trackHandle,
 				source,
-				std::nullopt));
-	std::optional<std::uint64_t> asyncId;
-	if (response) {
-		asyncId = DecodeLiveKitAsyncId(*response, kResponsePublishTrack);
-	}
-	if (!asyncId) {
+				asyncId));
+	if (!RequestAccepted(response, kResponsePublishTrack, asyncId)) {
 		FailWith(state, kPublishFailed);
 		return false;
 	}
-	state.publishAsyncIds.emplace(*asyncId, kind);
-	AddKey(state, *asyncId);
+	state.publishAsyncIds.emplace(asyncId, kind);
 	return true;
 }
 
@@ -739,6 +767,29 @@ void DispatchDisconnect(
 	FinishDisconnected(state);
 }
 
+// A room that the library drops for any reason other than this client's own
+// leave ends the call, as Android does. The room event of the disconnect that
+// the adapter asked for is ignored; its disconnect callback finishes the leave.
+void DispatchRoomDisconnected(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	if (state.phase != Phase::Connected || event.clientInitiated) {
+		return;
+	}
+	FailWith(state, kConnectionLost);
+}
+
+// Any E2EE failure state of a track ends the call, as Android does.
+void DispatchEncryptionState(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	if (state.phase != Phase::Connected
+		|| !IsEncryptionFailure(event.encryptionState)) {
+		return;
+	}
+	FailWith(state, kEncryptionFailed);
+}
+
 // A remote track is subscribed by the library. Audio is played by
 // PlatformAudio, so only its handle is kept. A video track opens a native
 // video stream whose frames go to the sink.
@@ -817,6 +868,10 @@ void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event) {
 		DispatchTrackSubscribed(state, event);
 	} else if (event.kind == LiveKitEventKind::TrackUnsubscribed) {
 		DispatchTrackUnsubscribed(state, event);
+	} else if (event.kind == LiveKitEventKind::RoomDisconnected) {
+		DispatchRoomDisconnected(state, event);
+	} else if (event.kind == LiveKitEventKind::EncryptionStateChanged) {
+		DispatchEncryptionState(state, event);
 	}
 }
 

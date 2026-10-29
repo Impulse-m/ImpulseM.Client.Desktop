@@ -19,8 +19,11 @@ class LiveKitEventRouter final {
 public:
 	using Route = std::function<void(const LiveKitEvent &event)>;
 	using RouteId = std::uint64_t;
+	using ReleaseHandle = std::function<void(std::uint64_t handle)>;
 
-	LiveKitEventRouter() = default;
+	// releaseHandle releases the library buffer handle of a video frame that no
+	// route takes, so the buffer does not stay owned by the library.
+	explicit LiveKitEventRouter(ReleaseHandle releaseHandle = nullptr);
 	LiveKitEventRouter(const LiveKitEventRouter &other) = delete;
 	LiveKitEventRouter &operator=(const LiveKitEventRouter &other) = delete;
 
@@ -43,12 +46,14 @@ public:
 	void removeRoute(RouteId id);
 
 	// Hands the event to the route that owns its async id or one of its
-	// handles. The route runs on the calling thread, outside the lock.
+	// handles. The route runs on the calling thread, outside the lock. A video
+	// frame that no route owns has its buffer handle released.
 	void dispatch(const LiveKitEvent &event);
 
 private:
 	void dropKeys(RouteId id);
 
+	const ReleaseHandle releaseHandle;
 	std::mutex mutex;
 	RouteId nextRouteId = 1;
 	std::map<RouteId, Route> routes;

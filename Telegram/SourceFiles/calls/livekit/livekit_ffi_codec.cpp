@@ -130,6 +130,17 @@ constexpr std::uint32_t kPublishCallbackPublication = 3;
 constexpr std::uint32_t kRoomEventHandle = 1;
 constexpr std::uint32_t kRoomEventTrackSubscribed = 9;
 constexpr std::uint32_t kRoomEventTrackUnsubscribed = 10;
+constexpr std::uint32_t kRoomEventDisconnected = 22;
+constexpr std::uint32_t kRoomEventE2eeStateChanged = 25;
+
+// Disconnected.reason, and the DisconnectReason value of a disconnect that this
+// client asked for (participant.proto).
+constexpr std::uint32_t kDisconnectedReason = 1;
+constexpr std::uint64_t kDisconnectReasonClientInitiated = 1;
+
+// E2eeStateChanged fields (room.proto).
+constexpr std::uint32_t kE2eeStateParticipantIdentity = 1;
+constexpr std::uint32_t kE2eeStateState = 2;
 
 // TrackSubscribed and TrackUnsubscribed fields.
 constexpr std::uint32_t kTrackSubscribedIdentity = 1;
@@ -290,8 +301,30 @@ constexpr std::uint32_t kComponentSize = 3;
 	return e2ee;
 }
 
-// Reads the RoomEvent of a room event envelope: the room handle and the track
-// subscription or unsubscription the adapter needs.
+[[nodiscard]] LiveKitEncryptionState EncryptionStateOf(std::uint64_t state) {
+	switch (state) {
+	case 0:
+		return LiveKitEncryptionState::New;
+	case 1:
+		return LiveKitEncryptionState::Ok;
+	case 2:
+		return LiveKitEncryptionState::EncryptionFailed;
+	case 3:
+		return LiveKitEncryptionState::DecryptionFailed;
+	case 4:
+		return LiveKitEncryptionState::MissingKey;
+	case 5:
+		return LiveKitEncryptionState::KeyRatcheted;
+	case 6:
+		return LiveKitEncryptionState::InternalError;
+	default:
+		return LiveKitEncryptionState::Unknown;
+	}
+}
+
+// Reads the RoomEvent of a room event envelope: the room handle, the track
+// subscription or unsubscription, the room drop and the E2EE state the adapter
+// needs.
 void DecodeRoomEvent(
 		std::span<const std::uint8_t> payload,
 		LiveKitEvent &result) {
@@ -300,6 +333,28 @@ void DecodeRoomEvent(
 		kRoomEventHandle);
 	if (roomHandle) {
 		result.roomHandle = *roomHandle;
+	}
+	const std::optional<std::span<const std::uint8_t>> disconnected =
+		FindMessage(payload, kRoomEventDisconnected);
+	if (disconnected) {
+		result.kind = LiveKitEventKind::RoomDisconnected;
+		result.clientInitiated = FindVarint(*disconnected, kDisconnectedReason)
+			.value_or(0) == kDisconnectReasonClientInitiated;
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> encryption =
+		FindMessage(payload, kRoomEventE2eeStateChanged);
+	if (encryption) {
+		result.kind = LiveKitEventKind::EncryptionStateChanged;
+		const std::optional<std::string> identity = FindString(
+			*encryption,
+			kE2eeStateParticipantIdentity);
+		if (identity) {
+			result.participantIdentity = *identity;
+		}
+		result.encryptionState = EncryptionStateOf(
+			FindVarint(*encryption, kE2eeStateState).value_or(0));
+		return;
 	}
 	const std::optional<std::span<const std::uint8_t>> subscribed =
 		FindMessage(payload, kRoomEventTrackSubscribed);

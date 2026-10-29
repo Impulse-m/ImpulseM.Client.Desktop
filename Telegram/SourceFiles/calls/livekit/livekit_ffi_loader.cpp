@@ -5,6 +5,7 @@
 #include "base/platform/win/base_windows_safe_library.h"
 #include "calls/livekit/livekit_ffi_codec.h"
 
+#include <atomic>
 #include <cstddef>
 #include <utility>
 
@@ -20,9 +21,22 @@ constexpr const char *kSdkName = "impulsem-desktop";
 constexpr const char *kSdkVersion = "1.0";
 
 using FfiCallbackFunction = void (*)(const std::uint8_t *, std::size_t);
+using DropHandleFunction = bool (*)(std::uint64_t);
+
+// The drop function of the process library. It is set once the library symbols
+// are resolved, before the library can call back into the router.
+std::atomic<DropHandleFunction> processDropHandle{nullptr};
+
+// Releases a buffer handle that no route took. The library thread calls it.
+void ReleaseUntakenHandle(std::uint64_t handle) {
+	const DropHandleFunction drop = processDropHandle.load();
+	if (drop) {
+		drop(handle);
+	}
+}
 
 LiveKitEventRouter &ProcessEventRouter() {
-	static LiveKitEventRouter router;
+	static LiveKitEventRouter router(&ReleaseUntakenHandle);
 	return router;
 }
 
@@ -105,7 +119,9 @@ LiveKitFfiLoader::LiveKitFfiLoader(const std::wstring &dllPath)
 			impl->disposeCall);
 	if (!resolved) {
 		impl->clearSymbols();
+		return;
 	}
+	processDropHandle.store(impl->dropHandleCall);
 }
 
 LiveKitFfiLoader::~LiveKitFfiLoader() = default;

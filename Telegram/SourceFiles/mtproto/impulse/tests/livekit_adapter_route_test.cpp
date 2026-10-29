@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace {
 
+constexpr std::uint32_t kFfiRequestConnect = 3;
 constexpr std::uint32_t kFfiRequestDisconnect = 4;
 constexpr std::uint32_t kFfiResponseConnect = 3;
 constexpr std::uint32_t kFfiResponseDisconnect = 4;
@@ -33,8 +34,54 @@ constexpr std::uint32_t kOwnedMessageField = 1;
 constexpr std::uint32_t kOwnedHandleField = 1;
 constexpr std::uint32_t kHandleIdField = 1;
 
+// The request_async_id of a connect or disconnect request.
+[[nodiscard]] std::optional<std::uint64_t> RequestAsyncId(
+		std::span<const std::uint8_t> data) {
+	Impulse::ProtoReader outer(data);
+	while (outer.next()) {
+		const std::uint32_t field = outer.field();
+		std::uint32_t asyncField = 0;
+		if (field == kFfiRequestConnect) {
+			asyncField = 4;
+		} else if (field == kFfiRequestDisconnect) {
+			asyncField = 2;
+		} else {
+			outer.skip();
+			continue;
+		}
+		const std::span<const std::uint8_t> payload = outer.readBytes();
+		Impulse::ProtoReader inner(payload);
+		while (inner.next()) {
+			if (inner.field() == asyncField) {
+				return inner.readVarint();
+			}
+			inner.skip();
+		}
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+// The async id of the request at the index, or 0 when there is no such request.
+[[nodiscard]] std::uint64_t AsyncIdAt(
+		const std::vector<std::vector<std::uint8_t>> &sent,
+		std::size_t index) {
+	if (index >= sent.size()) {
+		return 0;
+	}
+	return RequestAsyncId(sent[index]).value_or(0);
+}
+
+// The outer field number of an encoded response.
+[[nodiscard]] std::uint32_t ResponseField(
+		const std::vector<std::uint8_t> &response) {
+	Impulse::ProtoReader reader(response);
+	return reader.next() ? reader.field() : 0;
+}
+
 // Stands in for the library. It records every request, answers the scripted
-// responses in order, and keeps its own event router as the library does.
+// responses in order, and keeps its own event router as the library does. An
+// async request is answered with its own request_async_id, as the library does.
 class FakeFfi final : public Impulse::LiveKitFfi {
 public:
 	bool loaded() const override {
@@ -49,6 +96,14 @@ public:
 		}
 		std::vector<std::uint8_t> next = responses.front();
 		responses.erase(responses.begin());
+		const std::optional<std::uint64_t> requestId = RequestAsyncId(data);
+		if (requestId) {
+			Impulse::ProtoWriter inner;
+			inner.writeVarintField(kAsyncIdField, *requestId);
+			Impulse::ProtoWriter outer;
+			outer.writeMessageField(ResponseField(next), inner);
+			next = outer.takeBytes();
+		}
 		return next;
 	}
 
@@ -243,12 +298,15 @@ IMPULSE_TEST(LiveKitTwoAdaptersReceiveOnlyTheirOwnEvents) {
 
 	IMPULSE_CHECK(adapterA.connect("wss://room-a", "token"));
 	IMPULSE_CHECK(adapterB.connect("wss://room-b", "token"));
+	const std::uint64_t connectA = AsyncIdAt(fake->sent, 0);
+	const std::uint64_t connectB = AsyncIdAt(fake->sent, 1);
+	IMPULSE_CHECK(connectA != 0 && connectA != connectB);
 
-	fake->router.dispatch(ConnectEvent(202, 22, 23));
+	fake->router.dispatch(ConnectEvent(connectB, 22, 23));
 	IMPULSE_CHECK(delegateA.connected == 0);
 	IMPULSE_CHECK(delegateB.connected == 1);
 
-	fake->router.dispatch(ConnectEvent(101, 11, 12));
+	fake->router.dispatch(ConnectEvent(connectA, 11, 12));
 	IMPULSE_CHECK(delegateA.connected == 1);
 	IMPULSE_CHECK(delegateB.connected == 1);
 
@@ -259,7 +317,7 @@ IMPULSE_TEST(LiveKitTwoAdaptersReceiveOnlyTheirOwnEvents) {
 	if (fake->sent.size() == 7) {
 		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[6]) == 11);
 	}
-	fake->router.dispatch(DisconnectEvent(303));
+	fake->router.dispatch(DisconnectEvent(AsyncIdAt(fake->sent, 6)));
 	IMPULSE_CHECK(delegateA.disconnected == 1);
 	IMPULSE_CHECK(delegateB.disconnected == 0);
 	IMPULSE_CHECK(delegateB.failed == 0);
@@ -275,13 +333,14 @@ IMPULSE_TEST(LiveKitDestroyedWhileConnectingDisconnectsRoom) {
 	std::unique_ptr<Impulse::LiveKitAdapter> adapter =
 		std::make_unique<Impulse::LiveKitAdapter>(fake, delegate, RunNow);
 	IMPULSE_CHECK(adapter->connect("wss://room", "token"));
+	const std::uint64_t connectId = AsyncIdAt(fake->sent, 0);
 
 	// The room is not known to the adapter yet, so nothing is disconnected.
 	adapter.reset();
 	IMPULSE_CHECK(fake->sent.size() == 1);
 
 	// The library reports the room; the adapter disconnects it explicitly.
-	fake->router.dispatch(ConnectEvent(101, 11, 12));
+	fake->router.dispatch(ConnectEvent(connectId, 11, 12));
 	IMPULSE_CHECK(fake->sent.size() == 2);
 	if (fake->sent.size() == 2) {
 		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[1]) == 11);
@@ -289,12 +348,13 @@ IMPULSE_TEST(LiveKitDestroyedWhileConnectingDisconnectsRoom) {
 	IMPULSE_CHECK(delegate.connected == 0);
 
 	// The library confirms the disconnect, and the room handles are freed.
-	fake->router.dispatch(DisconnectEvent(303));
+	const std::uint64_t disconnectId = AsyncIdAt(fake->sent, 1);
+	fake->router.dispatch(DisconnectEvent(disconnectId));
 	IMPULSE_CHECK(delegate.disconnected == 0);
 	IMPULSE_CHECK(fake->dropped.size() == 2);
 
 	// The room is closed, so a late event of it reaches nobody.
-	fake->router.dispatch(DisconnectEvent(303));
+	fake->router.dispatch(DisconnectEvent(disconnectId));
 	IMPULSE_CHECK(fake->sent.size() == 2);
 }
 
@@ -310,7 +370,7 @@ IMPULSE_TEST(LiveKitDestroyedWhileConnectedDisconnectsRoom) {
 	std::unique_ptr<Impulse::LiveKitAdapter> adapter =
 		std::make_unique<Impulse::LiveKitAdapter>(fake, delegate, RunNow);
 	IMPULSE_CHECK(adapter->connect("wss://room", "token"));
-	fake->router.dispatch(ConnectEvent(101, 11, 12));
+	fake->router.dispatch(ConnectEvent(AsyncIdAt(fake->sent, 0), 11, 12));
 	IMPULSE_CHECK(delegate.connected == 1);
 
 	adapter.reset();
@@ -318,7 +378,7 @@ IMPULSE_TEST(LiveKitDestroyedWhileConnectedDisconnectsRoom) {
 	if (fake->sent.size() == 4) {
 		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[3]) == 11);
 	}
-	fake->router.dispatch(DisconnectEvent(303));
+	fake->router.dispatch(DisconnectEvent(AsyncIdAt(fake->sent, 3)));
 	IMPULSE_CHECK(delegate.disconnected == 0);
 	// The platform audio, the local participant and the room handles.
 	IMPULSE_CHECK(fake->dropped.size() == 3);

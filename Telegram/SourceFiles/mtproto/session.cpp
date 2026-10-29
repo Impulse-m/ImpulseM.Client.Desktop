@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/impulse/glue/impulse_connection.h"
 #include "mtproto/impulse/glue/impulse_session_private.h"
 #include "mtproto/mtproto_auth_key.h"
+#include "mtproto/mtproto_dc_options.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "base/unixtime.h"

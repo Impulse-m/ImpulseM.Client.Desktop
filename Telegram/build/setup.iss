@@ -84,6 +84,7 @@ Source: "{#ReleasePath}\{#ModulesFolder}\d3d\d3dcompiler_47.dll"; DestDir: "{app
 #if MyBuildTarget == "win64"
 Source: "{#ReleasePath}\{#ModulesFolder}\livekit\*"; DestDir: "{app}\{#ModulesFolder}\livekit"; Flags: ignoreversion
 Source: "{#ReleasePath}\{#ModulesFolder}\xray\*"; DestDir: "{app}\{#ModulesFolder}\xray"; Flags: ignoreversion
+Source: "{#ReleasePath}\impulse\tl-proto-232.json.gz"; DestDir: "{app}\impulse"; Flags: ignoreversion
 #endif
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 

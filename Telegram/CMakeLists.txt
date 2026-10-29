@@ -2582,6 +2582,23 @@ if (WIN32)
         message(WARNING "libXray.dll is missing, run the libxray prepare stage: ${xray_libxray_dll}")
     endif()
 
+    set(impulse_mapping_file ${src_loc}/mtproto/impulse/data/tl-proto-232.json.gz)
+    if (EXISTS ${impulse_mapping_file})
+        add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:Telegram>/impulse
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different
+            ${impulse_mapping_file}
+            $<TARGET_FILE_DIR:Telegram>/impulse/tl-proto-232.json.gz
+        COMMENT
+            "Copying tl-proto-232.json.gz for the mapping."
+        VERBATIM
+        )
+    else()
+        message(WARNING "tl-proto-232.json.gz is missing: ${impulse_mapping_file}")
+    endif()
+
     target_link_options(Telegram PRIVATE /PDBPAGESIZE:8192)
 elseif (APPLE)
     if (NOT DESKTOP_APP_USE_PACKAGED)

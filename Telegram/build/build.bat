@@ -86,6 +86,8 @@ copy /Y "%ReleasePath%\%BinaryName%.exe" "%StagePath%\" || goto error
 copy /Y "%ReleasePath%\%ModulesPath%\d3d\d3dcompiler_47.dll" "%StagePath%\%ModulesPath%\d3d\" || goto error
 xcopy "%ReleasePath%\%ModulesPath%\livekit" "%StagePath%\%ModulesPath%\livekit\" /E /I /Y || goto error
 xcopy "%ReleasePath%\%ModulesPath%\xray" "%StagePath%\%ModulesPath%\xray\" /E /I /Y || goto error
+mkdir "%StagePath%\impulse" || goto error
+copy /Y "%ReleasePath%\impulse\tl-proto-232.json.gz" "%StagePath%\impulse\" || goto error
 
 cd "%DeployPath%"
 7z a -mx9 "%PortableFile%" "%BinaryName%" || goto error

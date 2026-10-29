@@ -426,7 +426,20 @@ Instance::Private::Private(
 
 	_networkReachability->availableChanges(
 	) | rpl::on_next([=](bool available) {
+		if (impulseConnection) {
+			impulseConnection->networkChanged(available);
+		}
 		restart();
+	}, _lifetime);
+
+	// The app activation resumes the account transport, as Android resumes
+	// it when the screen turns on. The first value arrives before the
+	// transport exists, so the null check skips it.
+	Core::App().appDeactivatedValue(
+	) | rpl::on_next([=](bool deactivated) {
+		if (!deactivated && impulseConnection) {
+			impulseConnection->resume(_networkReachability->available());
+		}
 	}, _lifetime);
 
 	_deviceModelDefault = std::move(fields.deviceModel);

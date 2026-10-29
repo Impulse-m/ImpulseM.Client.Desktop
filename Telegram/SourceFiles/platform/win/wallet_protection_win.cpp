@@ -274,7 +274,7 @@ void FocusUnownedPrompt(int attemptsLeft = kPromptFocusAttempts) {
 // official release: no uninstaller beside the executable and not a canary
 // build. An installed copy and either canary are offered it whenever the
 // TPM and Hello itself allow, and so is a Debug build working from its
-// TelegramForcePortable folder, to debug the flow from the build output.
+// ImpulseMForcePortable folder, to debug the flow from the build output.
 [[nodiscard]] bool UninstallerPresent() {
 	static const auto Result = QFile::exists(cExeDir() + u"unins000.exe"_q);
 	return Result;
@@ -283,7 +283,7 @@ void FocusUnownedPrompt(int attemptsLeft = kPromptFocusAttempts) {
 [[nodiscard]] bool DebugPortable() {
 #ifdef _DEBUG
 	static const auto Result = (QDir(cWorkingDir())
-		== QDir(cExeDir() + u"TelegramForcePortable"_q));
+		== QDir(cExeDir() + u"ImpulseMForcePortable"_q));
 	return Result;
 #else // _DEBUG
 	return false;

@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/impulse/glue/impulse_connection.h"
+#include "mtproto/impulse/glue/token_store.h"
 #include "mainwidget.h"
 #include "api/api_updates.h"
 #include "ui/ui_utility.h"
@@ -664,7 +665,13 @@ void Account::logOut() {
 	if (_mtp) {
 		_mtp->logout([=] { loggedOut(); });
 	} else {
-		// We log out because we've forgotten passcode.
+		// We log out because we've forgotten passcode. There is no transport
+		// to clear the identity, so the account removes its identity file
+		// and the identity field here.
+		const std::filesystem::path identityPath(
+			(local().cachePath() + u"/impulse_identity"_q).toStdWString());
+		Impulse::DpapiTokenStore(identityPath).clear();
+		impulseIdentity = {};
 		loggedOut();
 	}
 }

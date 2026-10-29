@@ -200,40 +200,10 @@ SpecialConfigRequest::SpecialConfigRequest(
 
 	_manager.setProxy(QNetworkProxy::NoProxy);
 
-	std::random_device rd;
-	const auto shuffle = [&](int from, int till) {
-		Expects(till > from);
-
-		ranges::shuffle(
-			begin(_attempts) + from,
-			begin(_attempts) + till,
-			std::mt19937(rd()));
-	};
-
+	// ImpulseM: upstream special config and time sync (Google DNS, DNS over
+	// HTTPS and Firebase) is disabled. No attempts are queued, so no request
+	// leaves the process from here.
 	_attempts = {};
-	_attempts.push_back({ Type::Google, "dns.google.com" });
-	_attempts.push_back({ Type::Mozilla, "mozilla.cloudflare-dns.com" });
-	if (!_timeDoneCallback) {
-		_attempts.push_back({ Type::FireStore, "firestore" });
-		for (const auto &domain : DnsDomains()) {
-			_attempts.push_back({ Type::FireStore, domain, "firestore" });
-		}
-	}
-
-	shuffle(0, 2);
-	if (!_timeDoneCallback) {
-		shuffle(_attempts.size() - (int(DnsDomains().size()) + 1), _attempts.size());
-	}
-	if (isTestMode) {
-		_attempts.erase(ranges::remove_if(_attempts, [](
-				const Attempt &attempt) {
-			return (attempt.type != Type::Google)
-				&& (attempt.type != Type::Mozilla);
-		}), _attempts.end());
-	}
-	ranges::reverse(_attempts); // We go from last to first.
-
-	sendNextRequest();
 }
 
 SpecialConfigRequest::SpecialConfigRequest(

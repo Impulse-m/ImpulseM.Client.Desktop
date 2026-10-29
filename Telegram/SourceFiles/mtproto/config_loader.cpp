@@ -116,14 +116,9 @@ void ConfigLoader::enumerate() {
 }
 
 void ConfigLoader::refreshSpecialLoader() {
-	if (_proxyEnabled || _instance->isKeysDestroyer()) {
-		_specialLoader.reset();
-		return;
-	}
-	if (!_specialLoader
-		|| (!_specialEnumRequest && _specialEndpoints.empty())) {
-		createSpecialLoader();
-	}
+	// ImpulseM: upstream special config (Google, Firebase and DoH lookups)
+	// is disabled, so no special loader is ever created.
+	_specialLoader.reset();
 }
 
 void ConfigLoader::setPhone(const QString &phone) {

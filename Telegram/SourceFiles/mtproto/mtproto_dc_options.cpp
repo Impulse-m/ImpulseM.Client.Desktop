@@ -22,41 +22,6 @@ constexpr auto kVersion = 2;
 
 using namespace details;
 
-struct BuiltInDc {
-	int id;
-	const char *ip;
-	int port;
-};
-
-const BuiltInDc kBuiltInDcs[] = {
-	{ 1, "149.154.175.50" , 443 },
-	{ 2, "149.154.167.51" , 443 },
-	{ 2, "95.161.76.100"  , 443 },
-	{ 3, "149.154.175.100", 443 },
-	{ 4, "149.154.167.91" , 443 },
-	{ 5, "149.154.171.5"  , 443 },
-};
-
-const BuiltInDc kBuiltInDcsIPv6[] = {
-	{ 1, "2001:0b28:f23d:f001:0000:0000:0000:000a", 443 },
-	{ 2, "2001:067c:04e8:f002:0000:0000:0000:000a", 443 },
-	{ 3, "2001:0b28:f23d:f003:0000:0000:0000:000a", 443 },
-	{ 4, "2001:067c:04e8:f004:0000:0000:0000:000a", 443 },
-	{ 5, "2001:0b28:f23f:f005:0000:0000:0000:000a", 443 },
-};
-
-const BuiltInDc kBuiltInDcsTest[] = {
-	{ 1, "149.154.175.10" , 443 },
-	{ 2, "149.154.167.40" , 443 },
-	{ 3, "149.154.175.117", 443 }
-};
-
-const BuiltInDc kBuiltInDcsIPv6Test[] = {
-	{ 1, "2001:0b28:f23d:f001:0000:0000:0000:000e", 443 },
-	{ 2, "2001:067c:04e8:f002:0000:0000:0000:000e", 443 },
-	{ 3, "2001:0b28:f23d:f003:0000:0000:0000:000e", 443 }
-};
-
 const char *kTestPublicRSAKeys[] = { "\
 -----BEGIN RSA PUBLIC KEY-----\n\
 MIIBCgKCAQEAyMEdY1aR+sCR3ZSJrtztKTKqigvO/vBfqACJLZtS7QMgCGXJ6XIR\n\
@@ -167,32 +132,9 @@ void DcOptions::constructFromBuiltIn() {
 	WriteLocker lock(this);
 	_data.clear();
 
+	// ImpulseM: built-in Telegram DC addresses are not dialled. Endpoints
+	// come from the server config through setFromList() and addFromList().
 	readBuiltInPublicKeys();
-
-	const auto list = isTestMode()
-		? gsl::make_span(kBuiltInDcsTest)
-		: gsl::make_span(kBuiltInDcs).subspan(0);
-	for (const auto &entry : list) {
-		const auto flags = Flag::f_static | 0;
-		applyOneGuarded(entry.id, flags, entry.ip, entry.port, {});
-		DEBUG_LOG(("MTP Info: adding built in DC %1 connect option: %2:%3"
-			).arg(entry.id
-			).arg(entry.ip
-			).arg(entry.port));
-	}
-
-	const auto listv6 = isTestMode()
-		? gsl::make_span(kBuiltInDcsIPv6Test)
-		: gsl::make_span(kBuiltInDcsIPv6).subspan(0);
-	for (const auto &entry : listv6) {
-		const auto flags = Flag::f_static | Flag::f_ipv6;
-		applyOneGuarded(entry.id, flags, entry.ip, entry.port, {});
-		DEBUG_LOG(("MTP Info: adding built in DC %1 IPv6 connect option: "
-			"%2:%3"
-			).arg(entry.id
-			).arg(entry.ip
-			).arg(entry.port));
-	}
 }
 
 void DcOptions::processFromList(

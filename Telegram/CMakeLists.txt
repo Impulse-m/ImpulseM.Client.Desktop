@@ -2562,6 +2562,23 @@ if (WIN32)
         message(WARNING "livekit_ffi.dll is missing, run the livekit_ffi prepare stage: ${livekit_ffi_dll}")
     endif()
 
+    set(xray_libxray_dll ${libs_loc}/xray/libXray.dll)
+    if (EXISTS ${xray_libxray_dll})
+        add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:Telegram>/modules/x64/xray
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different
+            ${xray_libxray_dll}
+            $<TARGET_FILE_DIR:Telegram>/modules/x64/xray/libXray.dll
+        COMMENT
+            "Copying libXray.dll for proxy."
+        VERBATIM
+        )
+    else()
+        message(WARNING "libXray.dll is missing, run the libxray prepare stage: ${xray_libxray_dll}")
+    endif()
+
     target_link_options(Telegram PRIVATE /PDBPAGESIZE:8192)
 elseif (APPLE)
     if (NOT DESKTOP_APP_USE_PACKAGED)
@@ -2858,9 +2875,6 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         else()
             target_link_options(Updater PRIVATE -municode)
         endif()
-        if (DESKTOP_APP_WIN7_BASELINE)
-            target_link_options(Updater PRIVATE /SUBSYSTEM:WINDOWS,6.01)
-        endif()
     elseif (APPLE)
         # Keep the launch API available to macOS 10.13 release builds.
         target_compile_options(Updater PRIVATE -Wno-error=deprecated-declarations)
@@ -2897,12 +2911,6 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
 
         if (DESKTOP_APP_USE_PACKAGED)
             target_compile_definitions(Packer PRIVATE PACKER_USE_PACKAGED)
-        endif()
-
-        if (WIN32 AND DESKTOP_APP_WIN7_BASELINE)
-            # WindowsApp.lib is off the link line, WinRT stubs come from lib_base.
-            target_link_libraries(Packer PRIVATE desktop-app::lib_base)
-            target_link_options(Packer PRIVATE /SUBSYSTEM:CONSOLE,6.01)
         endif()
 
         set_target_properties(Packer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})

@@ -13,7 +13,7 @@ function(generate_midl target_name src_loc)
     elseif (build_win64)
         set(env x64)
     else()
-        set(env win32)
+        message(FATAL_ERROR "MIDL generation supports only x64 and arm64 Windows targets.")
     endif()
 
     set(gen_timestamp ${gen_dst}/${target_name}_midl.timestamp)

@@ -6,8 +6,8 @@
 #
 # Vendored libfido2 (+ libcbor): USB-HID CTAP2 security key backend for
 # webauthn/webauthn_common.cpp, linked against tdesktop's bundled OpenSSL.
-# On Windows it serves only systems without webauthn.dll (Win7/8/8.1,
-# Win10 < 1903); winhello.c is left out.
+# On Windows it serves only systems without webauthn.dll (Win10 < 1903);
+# winhello.c is left out.
 
 if (DESKTOP_APP_USE_PACKAGED)
     find_package(PkgConfig)

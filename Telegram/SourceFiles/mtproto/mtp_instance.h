@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Impulse {
 class ImpulseConnection;
+struct ImpulseAccountStorage;
 } // namespace Impulse
 
 namespace MTP {
@@ -52,6 +53,9 @@ public:
 		AuthKeysList keys;
 		QString deviceModel;
 		QString systemVersion;
+
+		// The account stores of the transport, used by the normal mode.
+		std::unique_ptr<Impulse::ImpulseAccountStorage> impulseStorage;
 	};
 
 	enum class Mode {

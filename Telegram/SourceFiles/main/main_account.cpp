@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "media/audio/media_audio.h"
 #include "mtproto/mtproto_config.h"
+#include "mtproto/impulse/glue/impulse_connection.h"
 #include "mainwidget.h"
 #include "api/api_updates.h"
 #include "ui/ui_utility.h"
@@ -501,6 +502,38 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	fields.config = std::move(config);
 	fields.deviceModel = Platform::DeviceModelPretty();
 	fields.systemVersion = Platform::SystemVersionPretty();
+
+	// The transport reads and writes the session pair in the account blob and
+	// keeps the identity token in its own file in the account cache folder.
+	std::unique_ptr<Impulse::ImpulseAccountStorage> impulseStorage
+		= std::make_unique<Impulse::ImpulseAccountStorage>();
+	impulseStorage->userId = static_cast<std::int64_t>(impulseSession.userId);
+	impulseStorage->identityPath = std::filesystem::path(
+		(local().cachePath() + u"/impulse_identity"_q).toStdWString());
+	impulseStorage->loadSession = [=]() -> std::optional<Impulse::SessionTokens> {
+		if (impulseSession.userId == 0 && impulseSession.accessToken.isEmpty()) {
+			return std::nullopt;
+		}
+		Impulse::SessionTokens tokens;
+		tokens.accessToken = impulseSession.accessToken.toStdString();
+		tokens.refreshToken = impulseSession.refreshToken.toStdString();
+		tokens.userId = static_cast<std::int64_t>(impulseSession.userId);
+		return tokens;
+	};
+	impulseStorage->saveSession = [=](const Impulse::SessionTokens &tokens) {
+		ImpulseSessionTokens saved;
+		saved.accessToken = QByteArray::fromStdString(tokens.accessToken);
+		saved.refreshToken = QByteArray::fromStdString(tokens.refreshToken);
+		saved.userId = static_cast<quint64>(tokens.userId);
+		setImpulseSessionTokens(std::move(saved));
+		local().writeMtpData();
+	};
+	impulseStorage->clearSession = [=]() {
+		setImpulseSessionTokens(ImpulseSessionTokens());
+		local().writeMtpData();
+	};
+	fields.impulseStorage = std::move(impulseStorage);
+
 	_mtp = std::make_unique<MTP::Instance>(
 		MTP::Instance::Mode::Normal,
 		std::move(fields));

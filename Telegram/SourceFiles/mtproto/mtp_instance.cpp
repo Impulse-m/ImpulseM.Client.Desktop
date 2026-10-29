@@ -304,6 +304,7 @@ private:
 		mtpRequestId requestId, DcId newdc);
 
 	void checkDelayedRequests();
+	void refreshImpulseMediaEndpoint();
 
 	const not_null<Instance*> _instance;
 	const Instance::Mode _mode = Instance::Mode::Normal;
@@ -317,6 +318,7 @@ private:
 	// The account transport, one per account in the normal mode. Created
 	// before the first session and destroyed after the last one.
 	std::unique_ptr<Impulse::ImpulseConnection> impulseConnection;
+	std::unique_ptr<Impulse::ImpulseAccountStorage> impulseStorage;
 
 	QString _deviceModelDefault;
 	QString _systemVersion;
@@ -412,6 +414,8 @@ Instance::Private::Private(
 , _proxySettings(Core::App().settings().proxy()) {
 	Expects(_config != nullptr);
 
+	impulseStorage = std::move(fields.impulseStorage);
+
 	const auto idealThreadPoolSize = QThread::idealThreadCount();
 	_fileSessionThreads.resize(2 * std::max(idealThreadPoolSize / 2, 1));
 
@@ -468,9 +472,19 @@ Instance::Private::Private(
 }
 
 void Instance::Private::start() {
-	if (isNormal()) {
-		impulseConnection = std::make_unique<Impulse::ImpulseConnection>();
-		impulseConnection->start();
+	if (isNormal() && impulseStorage) {
+		const std::int64_t userId = impulseStorage->userId;
+		impulseConnection = std::make_unique<Impulse::ImpulseConnection>(
+			std::move(*impulseStorage));
+		impulseStorage = nullptr;
+		impulseConnection->start(userId);
+		refreshImpulseMediaEndpoint();
+		dcOptions().changed() | rpl::on_next([=](DcId) {
+			refreshImpulseMediaEndpoint();
+		}, _lifetime);
+		_mainDcId.changes() | rpl::on_next([=](DcId) {
+			refreshImpulseMediaEndpoint();
+		}, _lifetime);
 	}
 	if (isKeysDestroyer()) {
 		for (const auto &[shiftedDcId, dc] : _dcenters) {
@@ -484,6 +498,31 @@ void Instance::Private::start() {
 
 	Assert(!hasMainDcId() == isKeysDestroyer());
 	requestConfig();
+}
+
+void Instance::Private::refreshImpulseMediaEndpoint() {
+	if (!impulseConnection) {
+		return;
+	}
+	const DcId dcId = mainDcId();
+	const DcOptions::Variants variants = dcOptions().lookup(
+		dcId,
+		DcType::MediaCluster,
+		false);
+	std::vector<Impulse::MediaDcOption> options;
+	for (int address = 0; address < DcOptions::Variants::AddressTypeCount; ++address) {
+		const std::vector<DcOptions::Endpoint> &endpoints
+			= variants.data[address][DcOptions::Variants::Tcp];
+		for (const DcOptions::Endpoint &endpoint : endpoints) {
+			Impulse::MediaDcOption option;
+			option.id = endpoint.id;
+			option.host = endpoint.ip;
+			option.port = endpoint.port;
+			option.mediaOnly = true;
+			options.push_back(std::move(option));
+		}
+	}
+	impulseConnection->setMediaOptions(options, dcId);
 }
 
 void Instance::Private::resolveProxyDomain(const QString &host) {

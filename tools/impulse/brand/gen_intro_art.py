@@ -1,11 +1,12 @@
 """Generates the monochrome ImpulseM marks that replace the paper plane in the intro screens.
 
 The desktop client draws the intro cover plane and the QR screen centre as monochrome
-icons: the alpha channel is the mask and the colour comes from the style. The plane is
-therefore replaced by a disc with the pulse cut out of it, taken from the same master logo
-as the icon set. The cover keeps its four parts, so only the top part carries the disc and
-the other three parts are written as empty canvases of the same size, which keeps the
-layout unchanged.
+icons. lib_ui reads the brightness of each pixel as the mask, not its alpha, so the files
+are written as opaque RGBA: white is the shape, black is the background, and alpha is 255
+everywhere. The plane is replaced by a disc with the pulse cut out of it, taken from the
+same master logo as the icon set. The cover keeps its four parts, so only the top part
+carries the disc and the other three parts are written as empty black canvases of the same
+size, which keeps the layout unchanged.
 
 Usage: python -I tools/impulse/brand/gen_intro_art.py --master <qr_logo.svg> --out-dir <icons dir>
 """
@@ -40,22 +41,29 @@ QR_SIZE: int = 35
 QR_DISC_FRACTION: float = 0.9
 
 
+def opaque_black(width: int, height: int) -> bytearray:
+    canvas: bytearray = bytearray(width * height * 4)
+    canvas[3::4] = b"\xff" * (width * height)
+    return canvas
+
+
 def render_mask(logo: gen.Logo, diameter: int) -> bytes:
     raw: bytes = gen.render_logo(logo, diameter, 0.0, gen.WHITE, BLACK)
     out: bytearray = bytearray(diameter * diameter * 4)
     for slot in range(diameter * diameter):
         red: int = raw[slot * 4]
         alpha: int = raw[slot * 4 + 3]
-        out[slot * 4] = 255
-        out[slot * 4 + 1] = 255
-        out[slot * 4 + 2] = 255
-        out[slot * 4 + 3] = (alpha * red + 127) // 255
+        coverage: int = (alpha * red + 127) // 255
+        out[slot * 4] = coverage
+        out[slot * 4 + 1] = coverage
+        out[slot * 4 + 2] = coverage
+        out[slot * 4 + 3] = 255
 
     return bytes(out)
 
 
 def place_centered(square: bytes, diameter: int, width: int, height: int) -> bytes:
-    canvas: bytearray = bytearray(width * height * 4)
+    canvas: bytearray = opaque_black(width, height)
     left: int = (width - diameter) // 2
     top: int = (height - diameter) // 2
     stride: int = diameter * 4
@@ -97,7 +105,7 @@ def generate(master_path: Path, out_dir: Path) -> List[Path]:
             cover_width,
             cover_height,
         )
-        cover_empty: bytes = bytes(cover_width * cover_height * 4)
+        cover_empty: bytes = bytes(opaque_black(cover_width, cover_height))
         for part in COVER_PARTS:
             pixels: bytes = cover_disc if part == COVER_DISC_PART else cover_empty
             target: Path = out_dir / f"{part}{suffix}.png"

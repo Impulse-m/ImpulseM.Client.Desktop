@@ -1073,6 +1073,13 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 
 	_conferenceSupported = call.is_conference_supported();
 
+	liveKitJoin = Impulse::ReadOneToOneJoin(call);
+	if (!liveKitJoin) {
+		LOG(("Call Error: Invalid LiveKit join parameters."));
+		finish(FinishType::Failed);
+		return;
+	}
+
 	const auto &protocol = call.vprotocol().c_phoneCallProtocol();
 	const auto &serverConfig = _user->session().serverConfig();
 

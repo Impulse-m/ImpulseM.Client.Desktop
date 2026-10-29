@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/bytes.h"
 #include "mtproto/sender.h"
 #include "mtproto/mtproto_auth_key.h"
+#include "calls/livekit/livekit_join.h"
 #include "webrtc/webrtc_device_resolver.h"
 #include "webrtc/webrtc_system_audio_capture.h"
 
@@ -381,6 +382,7 @@ private:
 	bool _ratingRequested = false;
 	bool _ratingInPanel = false;
 	uint64 _keyFingerprint = 0;
+	std::optional<Impulse::LiveKit::JoinParameters> liveKitJoin;
 
 	CallId _conferenceId = 0;
 	MsgId _conferenceInviteMsgId = 0;

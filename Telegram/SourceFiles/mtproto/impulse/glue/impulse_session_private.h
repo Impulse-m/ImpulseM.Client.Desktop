@@ -1,8 +1,9 @@
 // Session side of the ImpulseM transport. It replaces SessionPrivate with the
 // same surface and runs on the MTP thread. It encodes each request with the
 // transcoder and hands it to the account connection, which owns the sockets
-// and runs on the main thread. The response side of the requests is not
-// connected here yet: a completion only marks its request as settled.
+// and runs on the main thread. A completion runs on the main thread: it puts
+// the reply into SessionData, or it puts a request back into SessionData for
+// a retry after a network failure.
 #pragma once
 
 #include "base/flat_set.h"
@@ -10,6 +11,7 @@
 #include "mtproto/core_types.h"
 #include "mtproto/details/mtproto_serialized_request.h"
 #include "mtproto/facade.h"
+#include "mtproto/impulse/glue/rpc_carrier.h"
 
 #include <QtCore/QMutex>
 #include <QtCore/QObject>
@@ -68,6 +70,12 @@ private:
 		QMutex mutex;
 		base::flat_set<mtpRequestId> inFlight;
 		base::flat_set<std::vector<std::uint8_t>> declared;
+
+		// The state as SessionPrivate reports it. A negative value is a
+		// disconnect that retries in that many milliseconds.
+		int32 state = MTP::DisconnectedState;
+		crl::time retryTimeout = 1;
+		std::uint64_t retryGeneration = 0;
 	};
 
 	enum class Dispatch {
@@ -84,11 +92,33 @@ private:
 		const MTP::details::SerializedRequest &request);
 	void dispatchDeclaration(const std::vector<std::uint8_t> &payload);
 
+	// Runs on the main thread, or on the MTP thread, and sets the state
+	// shared with the completions.
+	static void publishState(
+		const std::shared_ptr<Tracking> &shared,
+		const std::shared_ptr<MTP::details::SessionData> &data,
+		int32 newState);
+
+	// Runs on the main thread. Settles one carrier reply of a request into
+	// SessionData, or puts the request back for a retry.
+	static void settleRequest(
+		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		const std::shared_ptr<Tracking> &shared,
+		const std::shared_ptr<MTP::details::SessionData> &data,
+		mtpRequestId requestId,
+		std::uint32_t methodId,
+		const MTP::details::SerializedRequest &request,
+		RpcCarrierReply reply);
+	static void scheduleRetry(
+		const base::weak_ptr<ImpulseSessionPrivate> &weak,
+		std::uint64_t generation,
+		crl::time delayMs);
+	void retryByTimer(std::uint64_t generation);
+
 	const not_null<MTP::Instance*> instance;
 	const MTP::ShiftedDcId shiftedDcId = 0;
 	const std::shared_ptr<MTP::details::SessionData> sessionData;
 	const std::shared_ptr<Tracking> tracking;
-	int32 state = MTP::DisconnectedState;
 
 };
 

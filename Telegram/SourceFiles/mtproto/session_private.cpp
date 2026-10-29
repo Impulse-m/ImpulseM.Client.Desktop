@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/details/mtproto_dump_to_text.h"
 #include "mtproto/details/mtproto_rsa_public_key.h"
 #include "mtproto/session.h"
+#include "mtproto/mtp_instance.h"
 #include "mtproto/mtproto_response.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/connection_abstract.h"
@@ -78,29 +79,6 @@ using namespace details;
 		idsStr += QString(", %2").arg(id.v);
 	}
 	return idsStr + "]";
-}
-
-[[nodiscard]] QString ComputeAppVersion() {
-#if defined Q_OS_WIN && defined Q_PROCESSOR_X86_64
-	const auto arch = u" x64"_q;
-#elif (defined Q_OS_WIN && defined Q_PROCESSOR_X86_32) || defined Q_PROCESSOR_X86_64
-	const auto arch = QString();
-#else
-	const auto arch = ' ' + QSysInfo::buildCpuArchitecture();
-#endif
-	return QString::fromLatin1(AppVersionStr) + arch + ([] {
-#if defined OS_MAC_STORE
-		return u" Mac App Store"_q;
-#elif defined OS_WIN_STORE // OS_MAC_STORE
-		return u" Microsoft Store"_q;
-#else // OS_MAC_STORE || OS_WIN_STORE
-		return KSandbox::isFlatpak()
-			? u" Flatpak"_q
-			: KSandbox::isSnap()
-			? u" Snap"_q
-			: QString();
-#endif // OS_MAC_STORE || OS_WIN_STORE
-	})();
 }
 
 void WrapInvokeAfter(

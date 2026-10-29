@@ -33,6 +33,10 @@ using AuthKeyPtr = std::shared_ptr<AuthKey>;
 using AuthKeysList = std::vector<AuthKeyPtr>;
 enum class Environment : uchar;
 
+// The app version that the connections declare: the version, the
+// architecture and the store or sandbox suffix.
+[[nodiscard]] QString ComputeAppVersion();
+
 class Instance : public QObject {
 	Q_OBJECT
 

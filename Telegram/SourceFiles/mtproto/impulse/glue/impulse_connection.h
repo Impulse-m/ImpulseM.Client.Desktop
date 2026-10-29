@@ -13,6 +13,8 @@
 
 #include "base/weak_ptr.h"
 #include "mtproto/core_types.h"
+#include "mtproto/impulse/core/connection_declaration.h"
+#include "mtproto/impulse/core/connection_declarer.h"
 #include "mtproto/impulse/glue/centrifuge_client.h"
 #include "mtproto/impulse/glue/connection_state_host.h"
 #include "mtproto/impulse/glue/identity_manager.h"
@@ -52,6 +54,10 @@ struct ImpulseAccountStorage {
 	std::function<void()> clearSession;
 	std::filesystem::path identityPath;
 	std::int64_t userId = 0;
+
+	// The initConnection declaration of the app, read when the connection
+	// starts. The values are the ones the classic session sends.
+	std::function<ConnectionDeclaration()> declarationSource;
 };
 
 class ImpulseConnection final : public base::has_weak_ptr {
@@ -180,7 +186,7 @@ private:
 	void answerConnectionToken(std::uint64_t requestId);
 	void refreshIdentityLane();
 	void adoptLogin(const SessionTokens &pair);
-	void redeclare(std::uint32_t attempt);
+	[[nodiscard]] std::string currentCredential();
 	void resolveUpdateToken(
 		std::uint64_t requestId,
 		CentrifugoTokenOutcome outcome,
@@ -209,6 +215,8 @@ private:
 	std::unique_ptr<LoginFlow> loginFlow;
 	std::unique_ptr<Realtime> realtime;
 	std::unique_ptr<LanesObserver> lanes;
+	std::unique_ptr<ConnectionDeclarer> declarer;
+	std::function<ConnectionDeclaration()> declarationSource;
 	UpdatesHandler updatesHandler;
 	std::map<mtpRequestId, std::shared_ptr<PendingRequest>> pendingRequests;
 	TransportRoute currentRoute;
@@ -216,8 +224,6 @@ private:
 	LaneIdentity laneIdentity;
 	std::int64_t openedChannelId = 0;
 	std::optional<std::string> mediaEndpoint;
-	// The last declaration of the connection, sent again after a login.
-	std::vector<std::uint8_t> lastDeclaration;
 	std::int64_t userId = 0;
 	bool started = false;
 	bool mediaPublished = false;

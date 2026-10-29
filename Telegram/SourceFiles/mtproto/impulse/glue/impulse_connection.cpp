@@ -34,11 +34,6 @@ const std::string kConnectionIdentityMethod = "connectionIdentity";
 const std::string kRefreshSessionMethod = "refreshSession";
 const std::string kInitConnectionMethod = "initConnection";
 
-// The declaration after a login is sent up to three times, one second apart,
-// as Android does when the update socket is not up yet.
-constexpr std::uint32_t kDeclarationAttempts = 3;
-constexpr std::int64_t kDeclarationRetryMs = 1000;
-
 // The code Android fails the login-only calls with when the login goes away.
 constexpr int kLoginLostErrorCode = -1000;
 
@@ -271,6 +266,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 		std::move(storage.saveSession),
 		std::move(storage.clearSession));
 	identityStore = std::make_unique<DpapiTokenStore>(storage.identityPath);
+	declarationSource = std::move(storage.declarationSource);
 
 	const std::shared_ptr<std::mt19937_64> engine
 		= std::make_shared<std::mt19937_64>(std::random_device()());
@@ -385,6 +381,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 		}
 		refreshIdentityLane();
 		releaseLoginWaiters();
+		declarer->credentialChanged();
 	});
 
 	// The realtime decode path of the account. Every decoded update goes to the
@@ -417,6 +414,30 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 		SharedTranscoder(),
 		[this](const SessionTokens &pair) {
 			adoptLogin(pair);
+		});
+
+	// The declarer sends initConnection over the update socket, once per
+	// credential and declaration. Its sends go through send() like any call.
+	declarer = std::make_unique<ConnectionDeclarer>(
+		[this](
+				const ConnectionDeclaration &declaration,
+				DeclarationSendDone done) {
+			RpcCarrierRequest request;
+			request.route.method = kInitConnectionMethod;
+			request.data = EncodeConnectionDeclaration(declaration);
+			send(
+				NextConnectionRequestId(),
+				std::move(request),
+				[done = std::move(done)](RpcCarrierReply reply) {
+					DeclarationReply answer;
+					answer.acknowledged
+						= (reply.outcome.kind == CarrierOutcomeKind::Reply);
+					done(answer);
+				});
+		},
+		MakeScheduler(base::make_weak(this)),
+		[this]() -> std::string {
+			return currentCredential();
 		});
 
 	buildTransport(ReadRoute());
@@ -453,6 +474,11 @@ void ImpulseConnection::start(std::int64_t userIdValue) {
 	const TransportRoute route = ReadRoute();
 	if (!SameRoute(route, currentRoute)) {
 		rebuildTransport(route);
+	}
+	// The declaration is read before the sockets dial, so the first declare
+	// after the connect carries the app values.
+	if (declarationSource) {
+		declarer->setDeclaration(ClampConnectionDeclaration(declarationSource()));
 	}
 	lanes->start();
 	connectSockets();
@@ -495,6 +521,7 @@ void ImpulseConnection::cleanup(bool resetKeys) {
 		identity->discard();
 		refreshIdentityLane();
 	}
+	declarer->credentialChanged();
 }
 
 void ImpulseConnection::setMediaOptions(
@@ -589,9 +616,6 @@ void ImpulseConnection::send(
 		&& method != kRefreshSessionMethod;
 	if (pending->capturesLogin) {
 		pending->methodId = MappedMethodId(method);
-	}
-	if (method == kInitConnectionMethod) {
-		lastDeclaration = request.data;
 	}
 	pendingRequests[requestId] = pending;
 
@@ -767,6 +791,8 @@ void ImpulseConnection::callSocket(
 }
 
 void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
+	// The declaration follows the credential the socket now presents. It is
+	// triggered after the token is answered, so the socket connects with it.
 	if (tokens->hasSession()) {
 		tokens->connectionToken([this, requestId](ConnectionTokenResult result) {
 			if (result.status == RefreshStatus::Fresh && !result.token.empty()) {
@@ -774,6 +800,7 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 					requestId,
 					CentrifugoTokenOutcome::Token,
 					result.token);
+				declarer->credentialChanged();
 				return;
 			}
 			const CentrifugoTokenOutcome outcome = (result.status == RefreshStatus::Ended)
@@ -786,6 +813,7 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 	const std::string current = identity->current();
 	if (!current.empty()) {
 		resolveUpdateToken(requestId, CentrifugoTokenOutcome::Token, current);
+		declarer->credentialChanged();
 		return;
 	}
 	identity->obtain([this, requestId](IdentityObtainResult result) {
@@ -793,10 +821,18 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 			// The identity lane of the minted identity is subscribed from now.
 			refreshIdentityLane();
 			resolveUpdateToken(requestId, CentrifugoTokenOutcome::Token, result.token);
+			declarer->credentialChanged();
 			return;
 		}
 		resolveUpdateToken(requestId, CentrifugoTokenOutcome::Failed, std::string());
 	});
+}
+
+std::string ImpulseConnection::currentCredential() {
+	if (tokens->hasSession()) {
+		return tokens->bearer();
+	}
+	return identity->current();
 }
 
 void ImpulseConnection::resolveUpdateToken(
@@ -837,35 +873,10 @@ void ImpulseConnection::adoptLogin(const SessionTokens &pair) {
 	// here, and the account lanes follow the user.
 	bindUser(pair.userId);
 	releaseLoginWaiters();
-	redeclare(1);
-}
 
-void ImpulseConnection::redeclare(std::uint32_t attempt) {
-	if (lastDeclaration.empty()) {
-		return;
-	}
-	RpcCarrierRequest request;
-	request.route.method = kInitConnectionMethod;
-	request.data = lastDeclaration;
-	const base::weak_ptr<ImpulseConnection> weak = base::make_weak(this);
-	send(
-		NextConnectionRequestId(),
-		std::move(request),
-		[weak, attempt](RpcCarrierReply reply) {
-			if (reply.outcome.kind == CarrierOutcomeKind::Reply
-				|| attempt >= kDeclarationAttempts) {
-				return;
-			}
-			base::call_delayed(
-				static_cast<crl::time>(kDeclarationRetryMs),
-				weak,
-				[weak, attempt]() {
-					ImpulseConnection *const connection = weak.get();
-					if (connection) {
-						connection->redeclare(attempt + 1);
-					}
-				});
-		});
+	// The socket is rekeyed to the access token: declare the connection again
+	// with it.
+	declarer->credentialChanged();
 }
 
 void ImpulseConnection::buildTransport(const TransportRoute &route) {
@@ -942,6 +953,12 @@ void ImpulseConnection::buildTransport(const TransportRoute &route) {
 	carrierDependencies.media = mediaFleet.get();
 	carrierDependencies.schedule = schedule;
 	rpcCarrier = std::make_unique<RpcCarrier>(std::move(carrierDependencies));
+
+	// A call that asks for the declaration waits for the declarer. The
+	// carrier's own declaration wait bounds the wait.
+	rpcCarrier->setDeclarationGate([this](std::function<void()> declared) {
+		declarer->awaitDeclared(std::move(declared));
+	});
 }
 
 void ImpulseConnection::dropTransport() {

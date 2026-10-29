@@ -3,6 +3,7 @@
 // the initConnection method. Qt-free, std only.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -10,6 +11,14 @@
 #include <vector>
 
 namespace Impulse {
+
+// The field limits of the server (DeclaredConnection), in UTF-16 code units.
+inline constexpr std::size_t kDeviceModelMaxLength = 100;
+inline constexpr std::size_t kSystemVersionMaxLength = 50;
+inline constexpr std::size_t kAppVersionMaxLength = 50;
+inline constexpr std::size_t kSystemLangCodeMaxLength = 32;
+inline constexpr std::size_t kLangPackMaxLength = 50;
+inline constexpr std::size_t kLangCodeMaxLength = 64;
 
 // The fields of ConnectionDeclaration, in the proto field numbering of initConnection.
 struct ConnectionDeclaration {
@@ -20,7 +29,15 @@ struct ConnectionDeclaration {
 	std::string systemLangCode;
 	std::string langPack;
 	std::string langCode;
+
+	bool operator==(const ConnectionDeclaration &other) const = default;
 };
+
+// Trims the spaces at both ends of each field and cuts it to the server limit,
+// at a whole UTF-8 character. The server cuts the same way, so the declared
+// value is the one the server stores.
+[[nodiscard]] ConnectionDeclaration ClampConnectionDeclaration(
+	ConnectionDeclaration declaration);
 
 // Reads the declaration of a TL request, looking through the invokeWithLayer,
 // invokeWithoutUpdates and invokeWithTakeout wrappers in front of it. Returns

@@ -20,6 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h" // Account::configUpdated.
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/version.h"
+#include "config.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_cloud_manager.h"
 #include "base/unixtime.h"
@@ -27,6 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/network_reachability.h"
 #include "test/test_rpc_retry.h"
+#include <ksandbox.h>
+#include "mtproto/impulse/core/connection_declaration.h"
 #include "mtproto/impulse/core/method_classes.h"
 #include "mtproto/impulse/glue/impulse_connection.h"
 
@@ -487,6 +491,19 @@ Instance::Private::Private(
 void Instance::Private::start() {
 	if (isNormal() && impulseStorage) {
 		const std::int64_t userId = impulseStorage->userId;
+		// The declaration values are the ones the classic session declares,
+		// read again each time the connection declares.
+		impulseStorage->declarationSource = [this]() -> Impulse::ConnectionDeclaration {
+			Impulse::ConnectionDeclaration declaration;
+			declaration.apiId = ApiId;
+			declaration.deviceModel = deviceModel().toStdString();
+			declaration.systemVersion = systemVersion().toStdString();
+			declaration.appVersion = ComputeAppVersion().toStdString();
+			declaration.systemLangCode = _instance->systemLangCode().toStdString();
+			declaration.langPack = _instance->langPackName().toStdString();
+			declaration.langCode = _instance->cloudLangCode().toStdString();
+			return declaration;
+		};
 		impulseConnection = std::make_unique<Impulse::ImpulseConnection>(
 			std::move(*impulseStorage));
 		impulseStorage = nullptr;
@@ -2156,6 +2173,29 @@ DcId Instance::mainDcId() const {
 
 rpl::producer<DcId> Instance::mainDcIdValue() const {
 	return _private->mainDcIdValue();
+}
+
+QString ComputeAppVersion() {
+#if defined Q_OS_WIN && defined Q_PROCESSOR_X86_64
+	const auto arch = u" x64"_q;
+#elif (defined Q_OS_WIN && defined Q_PROCESSOR_X86_32) || defined Q_PROCESSOR_X86_64
+	const auto arch = QString();
+#else
+	const auto arch = ' ' + QSysInfo::buildCpuArchitecture();
+#endif
+	return QString::fromLatin1(AppVersionStr) + arch + ([] {
+#if defined OS_MAC_STORE
+		return u" Mac App Store"_q;
+#elif defined OS_WIN_STORE // OS_MAC_STORE
+		return u" Microsoft Store"_q;
+#else // OS_MAC_STORE || OS_WIN_STORE
+		return KSandbox::isFlatpak()
+			? u" Flatpak"_q
+			: KSandbox::isSnap()
+			? u" Snap"_q
+			: QString();
+#endif // OS_MAC_STORE || OS_WIN_STORE
+	})();
 }
 
 QString Instance::systemLangCode() const {

@@ -3,6 +3,8 @@
 #include "mtproto/impulse/core/transcoder.h"
 #include "mtproto/impulse/core/wire.h"
 
+#include <algorithm>
+
 namespace Impulse {
 namespace {
 
@@ -27,6 +29,61 @@ constexpr std::uint32_t kDeclarationField = 1;
 	return std::string(
 		reinterpret_cast<const char *>(bytes.data()),
 		bytes.size());
+}
+
+// The UTF-16 code units of one UTF-8 character, given its lead byte. A four
+// byte character is a surrogate pair.
+[[nodiscard]] std::size_t Utf16UnitsOf(unsigned char lead) {
+	return (lead >= 0xF0) ? 2 : 1;
+}
+
+// The byte length of one UTF-8 character, given its lead byte. A byte that is
+// not a lead byte counts as one character, so a broken value is still cut.
+[[nodiscard]] std::size_t Utf8LengthOf(unsigned char lead) {
+	if (lead >= 0xF0) {
+		return 4;
+	} else if (lead >= 0xE0) {
+		return 3;
+	} else if (lead >= 0xC0) {
+		return 2;
+	}
+	return 1;
+}
+
+[[nodiscard]] bool IsSpace(char symbol) {
+	return symbol == ' ' || symbol == '\t' || symbol == '\r' || symbol == '\n';
+}
+
+// The value trimmed at both ends and cut to maxUnits UTF-16 code units. The
+// cut keeps whole characters and never leaves a trailing space.
+[[nodiscard]] std::string FitField(const std::string &value, std::size_t maxUnits) {
+	std::size_t first = 0;
+	while (first < value.size() && IsSpace(value[first])) {
+		++first;
+	}
+	std::size_t last = value.size();
+	while (last > first && IsSpace(value[last - 1])) {
+		--last;
+	}
+
+	std::string result;
+	std::size_t units = 0;
+	std::size_t index = first;
+	while (index < last) {
+		const unsigned char lead = static_cast<unsigned char>(value[index]);
+		const std::size_t length = std::min(Utf8LengthOf(lead), last - index);
+		const std::size_t cost = Utf16UnitsOf(lead);
+		if (units + cost > maxUnits) {
+			break;
+		}
+		result.append(value, index, length);
+		units += cost;
+		index += length;
+	}
+	while (!result.empty() && IsSpace(result.back())) {
+		result.pop_back();
+	}
+	return result;
 }
 
 } // namespace
@@ -82,6 +139,29 @@ std::vector<std::uint8_t> EncodeConnectionDeclaration(
 	ProtoWriter payload;
 	payload.writeMessageField(kDeclarationField, message);
 	return payload.takeBytes();
+}
+
+ConnectionDeclaration ClampConnectionDeclaration(
+		ConnectionDeclaration declaration) {
+	declaration.deviceModel = FitField(
+		declaration.deviceModel,
+		kDeviceModelMaxLength);
+	declaration.systemVersion = FitField(
+		declaration.systemVersion,
+		kSystemVersionMaxLength);
+	declaration.appVersion = FitField(
+		declaration.appVersion,
+		kAppVersionMaxLength);
+	declaration.systemLangCode = FitField(
+		declaration.systemLangCode,
+		kSystemLangCodeMaxLength);
+	declaration.langPack = FitField(
+		declaration.langPack,
+		kLangPackMaxLength);
+	declaration.langCode = FitField(
+		declaration.langCode,
+		kLangCodeMaxLength);
+	return declaration;
 }
 
 } // namespace Impulse

@@ -42,7 +42,11 @@ EXPECTED_PNG_SIZES: Dict[str, int] = {
     "iconbig_green.png": 256,
 }
 EXPECTED_ICO_SIZES: List[int] = [16, 20, 24, 32, 40, 48, 64, 256]
-EXPECTED_TRAY_NAMES: List[str] = ["tray_white_on_blue.svg", "tray_blue_on_white.svg"]
+EXPECTED_TRAY_NAMES: List[str] = [
+    "tray_white_on_blue.svg",
+    "tray_blue_on_white.svg",
+    "tray_monochrome.svg",
+]
 
 
 def read_png(data: bytes) -> Tuple[int, int, bytes]:
@@ -173,6 +177,12 @@ class GenIconsTest(unittest.TestCase):
         self.assertIn('stroke="#FFFFFF"', white_on_blue)
         self.assertIn('fill="#FFFFFF"', blue_on_white)
         self.assertIn('stroke="#2085DF"', blue_on_white)
+
+    def test_tray_mask_is_glyph_only(self) -> None:
+        mask: str = self.icon_path("tray_monochrome.svg").read_text(encoding="utf-8")
+        self.assertNotIn("<circle", mask)
+        self.assertIn('stroke="#000000"', mask)
+        self.assertIn('stroke-linecap="round"', mask)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
+#include "core/impulse_proxy/proxy_service.h"
 #include "storage/storage_account.h"
 #include "storage/storage_domain.h" // Storage::StartResult.
 #include "storage/serialize_common.h"
@@ -119,6 +120,22 @@ void Account::watchProxyChanges() {
 		if (_mtpForKeysDestroy) {
 			_mtpForKeysDestroy->restart();
 		}
+	}, _lifetime);
+
+	// The impulse sockets follow every route change, including the ones the
+	// runtime makes (a core restart or the kill switch), not only the changes
+	// of the settings. The first value is the current route, not a change.
+	Core::App().impulseProxy().routeValue(
+	) | rpl::skip(1) | rpl::on_next([=] {
+		if (!_mtp) {
+			return;
+		}
+		Impulse::ImpulseConnection *const connection = _mtp->impulse();
+		if (!connection) {
+			return;
+		}
+		Impulse::ImpulseConnection::beginProxyChange();
+		connection->proxyChanged();
 	}, _lifetime);
 }
 

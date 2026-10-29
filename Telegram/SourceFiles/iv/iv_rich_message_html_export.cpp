@@ -93,6 +93,7 @@ struct HtmlContext {
 	Fn<std::optional<RenderedFormulaImage>(
 		const QString &tex,
 		bool display)> renderFormula;
+	QString internalLinksPrefix;
 	bool *slideshowUsed = nullptr;
 	bool clipboard = false;
 };
@@ -364,8 +365,10 @@ struct EntityTags {
 	case EntityType::Phone:
 		return LinkTags(u"tel:"_q + inner.toString());
 	case EntityType::Mention:
-		return LinkTags(u"https://t.me/"_q
-			+ inner.toString().mid(inner.startsWith(QChar('@')) ? 1 : 0));
+		return context.internalLinksPrefix.isEmpty()
+			? EntityTags()
+			: LinkTags(context.internalLinksPrefix
+				+ inner.toString().mid(inner.startsWith(QChar('@')) ? 1 : 0));
 	case EntityType::MentionName: {
 		const auto fields = TextUtilities::MentionNameDataToFields(
 			entity.data());
@@ -1011,9 +1014,10 @@ void SerializeBlock(
 		}
 		break;
 	case Kind::Channel: {
-		const auto link = block.username.isEmpty()
+		const auto link = (block.username.isEmpty()
+				|| context.internalLinksPrefix.isEmpty())
 			? QString()
-			: u"https://t.me/"_q + block.username;
+			: context.internalLinksPrefix + block.username;
 		const auto href = AnchorHref(link);
 		*out += u"<div class=\"channel\"%1>"_q.arg(
 			IdAttribute(block.anchorId));
@@ -1455,10 +1459,10 @@ QByteArray RichBlocksClipboardHtml(
 		return QByteArray();
 	}
 	auto media = ClipboardMedia();
-	CollectClipboardMedia(
-		media,
-		session ? session : RichBlocksMediaSession(slice.blocks),
-		slice.blocks);
+	const auto linksSession = session
+		? session
+		: RichBlocksMediaSession(slice.blocks);
+	CollectClipboardMedia(media, linksSession, slice.blocks);
 
 	auto page = RichPage();
 	page.blocks = slice.blocks;
@@ -1528,6 +1532,9 @@ QByteArray RichBlocksClipboardHtml(
 		.documentPaths = &media.documentPaths,
 		.documentPosters = &media.documentPosters,
 		.renderFormula = renderFormulaImage,
+		.internalLinksPrefix = linksSession
+			? linksSession->createInternalLinkFull(QString())
+			: QString(),
 		.clipboard = true,
 	});
 }
@@ -2007,6 +2014,7 @@ void RichMessageHtmlExport::finalize() {
 		.photoPaths = &_photoPaths,
 		.documentPaths = &_documentPaths,
 		.renderFormula = renderFormulaImage,
+		.internalLinksPrefix = _session->createInternalLinkFull(QString()),
 	});
 	auto file = QFile(_htmlPath);
 	auto written = file.open(QIODevice::WriteOnly)

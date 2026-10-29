@@ -36,6 +36,9 @@ void Activate(ActivateArgs args) {
 	content->setRightIcon(RightIcon::Close);
 	content->setLeadingWidget(nullptr);
 	content->setClickedCallback([=] {
+		if (!session->premiumCanBuy()) {
+			return;
+		}
 		const auto controller = findController();
 		UrlClickHandler::Open(
 			u"https://t.me/premiumbot?start=status"_q,

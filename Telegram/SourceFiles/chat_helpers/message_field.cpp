@@ -600,8 +600,11 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 	return style;
 }
 
-[[nodiscard]] bool IsGoodFactcheckUrl(QStringView url) {
-	return url.startsWith(u"t.me/"_q) || url.startsWith(u"https://t.me/"_q);
+[[nodiscard]] bool IsGoodFactcheckUrl(
+		QStringView url,
+		const QString &prefix) {
+	const auto bare = QStringView(prefix).mid(prefix.indexOf(u"://"_q) + 3);
+	return url.startsWith(prefix) || url.startsWith(bare);
 }
 
 [[nodiscard]] Fn<bool(
@@ -617,8 +620,9 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 			TextWithTags text,
 			QString link,
 			EditLinkAction action) {
+		const auto prefix = show->session().createInternalLinkFull(QString());
 		const auto validate = [=](QString url) {
-			if (IsGoodFactcheckUrl(url)) {
+			if (IsGoodFactcheckUrl(url, prefix)) {
 				const auto start = u"https://"_q;
 				return url.startsWith(start) ? url : (start + url);
 			}
@@ -627,7 +631,7 @@ auto InitMessageFieldHandlers(MessageFieldHandlersArgs &&args)
 			return QString();
 		};
 		if (action == EditLinkAction::Check) {
-			return IsGoodFactcheckUrl(link);
+			return IsGoodFactcheckUrl(link, prefix);
 		}
 		auto callback = [=](const TextWithTags &text, const QString &link) {
 			if (const auto strong = weak.get()) {

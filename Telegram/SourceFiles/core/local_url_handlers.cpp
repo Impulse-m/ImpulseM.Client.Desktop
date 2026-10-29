@@ -2077,6 +2077,11 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 		Impulse::Links::PrefixHost(prefix.toStdString()));
 }
 
+QString InternalLinksPrefix() {
+	const auto host = ConfiguredLinksHost();
+	return host.isEmpty() ? QString() : u"https://"_q + host;
+}
+
 QString TryConvertUrlToLocal(QString url) {
 	if (url.size() > 8192) {
 		url = url.mid(0, 8192);

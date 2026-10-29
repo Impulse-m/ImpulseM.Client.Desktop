@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "core/file_utilities.h"
+#include "core/local_url_handlers.h"
 #include "core/shortcuts.h"
 #include "webview/webview_embed.h"
 #include "webview/webview_dialog.h"
@@ -2926,7 +2927,13 @@ void Panel::openTgLink(const QJsonObject &args) {
 		requestClose();
 		return;
 	}
-	_delegate->botHandleLocalUri("https://t.me" + path, true);
+	const auto prefix = Core::InternalLinksPrefix();
+	if (prefix.isEmpty()) {
+		LOG(("BotWebView Error: No internal links host in 'web_app_open_tg_link'."));
+		requestClose();
+		return;
+	}
+	_delegate->botHandleLocalUri(prefix + path, true);
 }
 
 void Panel::openExternalLink(const QJsonObject &args) {

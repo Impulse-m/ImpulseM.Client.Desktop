@@ -1870,6 +1870,9 @@ void StartPremiumPayment(
 	const auto slug = session->appConfig().get<QString>(
 		u"premium_invoice_slug"_q,
 		QString());
+	if (!session->premiumCanBuy()) {
+		return;
+	}
 	if (!username.isEmpty()) {
 		controller->showPeerByLink(Window::PeerByLinkInfo{
 			.usernameOrId = username,

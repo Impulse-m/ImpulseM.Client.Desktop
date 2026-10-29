@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/network_reachability.h"
 #include "test/test_rpc_retry.h"
 #include "mtproto/impulse/core/method_classes.h"
+#include "mtproto/impulse/glue/impulse_connection.h"
 
 namespace MTP {
 namespace {
@@ -262,6 +263,7 @@ public:
 	void prepareToDestroy();
 
 	[[nodiscard]] rpl::lifetime &lifetime();
+	[[nodiscard]] Impulse::ImpulseConnection *impulse() const;
 
 private:
 	void importDone(
@@ -311,6 +313,10 @@ private:
 	std::unique_ptr<QThread> _mainSessionThread;
 	std::unique_ptr<QThread> _otherSessionsThread;
 	std::vector<std::unique_ptr<QThread>> _fileSessionThreads;
+
+	// The account transport, one per account in the normal mode. Created
+	// before the first session and destroyed after the last one.
+	std::unique_ptr<Impulse::ImpulseConnection> impulseConnection;
 
 	QString _deviceModelDefault;
 	QString _systemVersion;
@@ -462,6 +468,10 @@ Instance::Private::Private(
 }
 
 void Instance::Private::start() {
+	if (isNormal()) {
+		impulseConnection = std::make_unique<Impulse::ImpulseConnection>();
+		impulseConnection->start();
+	}
 	if (isKeysDestroyer()) {
 		for (const auto &[shiftedDcId, dc] : _dcenters) {
 			startSession(shiftedDcId);
@@ -2048,6 +2058,13 @@ void Instance::Private::prepareToDestroy() {
 			thread->wait();
 		}
 	}
+
+	// The sessions are gone, so nothing posts to the transport any more.
+	impulseConnection.reset();
+}
+
+Impulse::ImpulseConnection *Instance::Private::impulse() const {
+	return impulseConnection.get();
 }
 
 Instance::Instance(Mode mode, Fields &&fields)
@@ -2328,6 +2345,10 @@ rpl::lifetime &Instance::lifetime() {
 
 Instance::~Instance() {
 	_private->prepareToDestroy();
+}
+
+Impulse::ImpulseConnection *Instance::impulse() const {
+	return _private->impulse();
 }
 
 } // namespace MTP

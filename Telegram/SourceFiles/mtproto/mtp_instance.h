@@ -10,6 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/details/mtproto_serialized_request.h"
 #include "mtproto/mtproto_response.h"
 
+namespace Impulse {
+class ImpulseConnection;
+} // namespace Impulse
+
 namespace MTP {
 namespace details {
 
@@ -225,6 +229,10 @@ public:
 	}
 
 	[[nodiscard]] rpl::lifetime &lifetime();
+
+	// Main thread. The transport owner of the account; null in the keys
+	// destroyer mode, which has no account transport.
+	[[nodiscard]] Impulse::ImpulseConnection *impulse() const;
 
 Q_SIGNALS:
 	void proxyDomainResolved(

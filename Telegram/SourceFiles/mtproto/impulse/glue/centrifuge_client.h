@@ -73,6 +73,7 @@ private:
 	ConnectionStateHost *connectionState = nullptr;
 	std::map<std::string, SubscriptionCallback> subscriptionCallbacks;
 	std::set<std::string> positionDropped;
+	bool deliberateDisconnect = false;
 
 public:
 	CentrifugeClient() = default;
@@ -93,6 +94,9 @@ public:
 	// Starts connecting from the disconnected state. The state moves to
 	// Connecting now and to Connected on the connected event.
 	[[nodiscard]] std::int32_t connect();
+
+	// The disconnect the caller asks for is not network loss: the owner is not
+	// told about the Disconnected event that follows it.
 	[[nodiscard]] std::int32_t disconnect();
 
 	// Reconnects without the backoff wait; see CentrifugoRust::reconnectNow.
@@ -104,6 +108,10 @@ public:
 	void close();
 
 	[[nodiscard]] CentrifugeState currentState() const;
+
+	// The Rust client behind this facade, null before create(). It is owned by
+	// the facade; the media pool of the fleet is built on it.
+	[[nodiscard]] CentrifugoRust *rustClient() const;
 
 	void setStateCallback(StateCallback callback);
 	void setErrorCallback(ErrorCallback callback);

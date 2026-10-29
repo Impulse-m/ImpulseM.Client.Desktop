@@ -74,6 +74,7 @@ std::int32_t CentrifugeClient::connect() {
 	if (!rust) {
 		return kCentrifugoStatusNotInitialized;
 	}
+	deliberateDisconnect = false;
 	const std::int32_t status = rust->connect();
 	if (status == kCentrifugoStatusOk && state == CentrifugeState::Disconnected) {
 		setState(CentrifugeState::Connecting);
@@ -85,7 +86,11 @@ std::int32_t CentrifugeClient::disconnect() {
 	if (!rust) {
 		return kCentrifugoStatusNotInitialized;
 	}
-	return rust->disconnect();
+	const std::int32_t status = rust->disconnect();
+	if (status == kCentrifugoStatusOk) {
+		deliberateDisconnect = true;
+	}
+	return status;
 }
 
 std::int32_t CentrifugeClient::reconnectNow() {
@@ -110,6 +115,10 @@ void CentrifugeClient::close() {
 
 CentrifugeState CentrifugeClient::currentState() const {
 	return state;
+}
+
+CentrifugoRust *CentrifugeClient::rustClient() const {
+	return rust.get();
 }
 
 void CentrifugeClient::setStateCallback(StateCallback callback) {
@@ -217,17 +226,20 @@ void CentrifugeClient::onEvent(const CentrifugoEvent &event) {
 		setState(CentrifugeState::Connected);
 		break;
 
-	case CentrifugoEventKind::Disconnected:
+	case CentrifugoEventKind::Disconnected: {
 		// Only terminal disconnects reach this event: the client redials by
 		// itself after the reconnect codes, 4001 session revoked and 4002
-		// membership escalation among them. A terminal close (4500 range, or
-		// the call of disconnect()) goes to network loss: any phase of the
-		// connection state machine goes to Disconnected.
+		// membership escalation among them. A terminal close of the 4500 range
+		// goes to network loss: any phase of the connection state machine goes
+		// to Disconnected. The close asked for by disconnect() does not.
+		const bool requested = deliberateDisconnect;
+		deliberateDisconnect = false;
 		setState(CentrifugeState::Disconnected);
-		if (connectionState) {
+		if (connectionState && !requested) {
 			connectionState->onNetworkLost();
 		}
 		break;
+	}
 
 	case CentrifugoEventKind::Error:
 		// A transport or connect error while connected means the client

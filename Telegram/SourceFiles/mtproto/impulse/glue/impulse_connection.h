@@ -1,9 +1,14 @@
 // Transport owner of one account. It creates the update and pool socket
-// facades, the RPC carrier, the media fleet, the connection state host and
-// the token and identity managers, and it is the only owner of them. Nothing
-// dials before start(). Every method and every callback runs on the Qt main
-// thread: the sessions of the account post their requests here, and the
-// completions come back on the main thread.
+// facades, the RPC carrier, the media fleet, the connection state host, the
+// token and identity managers, the realtime decode path and the lanes
+// observer, and it is the only owner of them. Nothing dials before start().
+// Every method and every callback runs on the Qt main thread: the sessions of
+// the account post their requests here, and the completions come back on the
+// main thread.
+//
+// The sockets follow the proxy route. A route change recreates the facades,
+// because the Rust client takes its proxy URL only at create time; a change of
+// the URL alone would keep dialling the old route.
 #pragma once
 
 #include "base/weak_ptr.h"
@@ -11,10 +16,13 @@
 #include "mtproto/impulse/glue/centrifuge_client.h"
 #include "mtproto/impulse/glue/connection_state_host.h"
 #include "mtproto/impulse/glue/identity_manager.h"
+#include "mtproto/impulse/glue/lanes_observer.h"
 #include "mtproto/impulse/glue/media_fleet.h"
+#include "mtproto/impulse/glue/realtime.h"
 #include "mtproto/impulse/glue/rpc_carrier.h"
 #include "mtproto/impulse/glue/token_manager.h"
 #include "mtproto/impulse/glue/token_store.h"
+#include "mtproto/mtproto_response.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -22,9 +30,17 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace Impulse {
+
+// The route of the sockets: blocked, or the proxy URL of the sockets (empty
+// when the traffic goes direct).
+struct TransportRoute {
+	bool blocked = true;
+	std::string proxyUrl;
+};
 
 // What the account hands its transport. The session pair lives in the account
 // blob, so the account supplies its load, save and clear. The identity token
@@ -39,6 +55,11 @@ struct ImpulseAccountStorage {
 
 class ImpulseConnection final : public base::has_weak_ptr {
 public:
+	// Receives the decoded updates of the realtime lanes and the synthetic
+	// difference triggers. It runs on the main thread, and it is handed the
+	// response as a push of the main session would be.
+	using UpdatesHandler = std::function<void(const MTP::Response &response)>;
+
 	explicit ImpulseConnection(ImpulseAccountStorage storage);
 	ImpulseConnection(const ImpulseConnection &other) = delete;
 	ImpulseConnection &operator=(const ImpulseConnection &other) = delete;
@@ -47,9 +68,14 @@ public:
 	// then the pool and the update sockets, in that order.
 	~ImpulseConnection();
 
+	// Sets the handler of the realtime updates. Without it the updates are
+	// dropped.
+	void setUpdatesHandler(UpdatesHandler handler);
+
 	// Connects the update and the pool sockets, once, and binds the account
-	// user id. A route that blocks the traffic (the blackhole endpoint of the
-	// proxy) never connects. A second start only binds the user id again.
+	// user id. The route is read again here. A route that blocks the traffic
+	// (the blackhole endpoint of the proxy, or an unknown route) never connects.
+	// A second start only binds the user id again.
 	void start(std::int64_t userId);
 
 	// The account user id changed. A login releases the calls that wait for
@@ -58,7 +84,7 @@ public:
 
 	// Fails the calls that need a login with -1000, and clears the tokens when
 	// resetKeys is set or a user was bound. The media pool is retired then, as
-	// Android cleanup does.
+	// Android cleanup does. The account lanes are dropped with the user.
 	void cleanup(bool resetKeys);
 
 	// Publishes the media endpoint of thisDc from the media_only options of the
@@ -67,6 +93,36 @@ public:
 	void setMediaOptions(
 		const std::vector<MediaDcOption> &options,
 		int thisDc);
+
+	// Sets the dialog candidates of the channel lanes and the opened channel
+	// (0 when none). The lanes observer recomputes the channel lanes from them.
+	void setLanes(
+		std::vector<LaneCandidate> candidates,
+		std::int64_t openedChannelId);
+
+	// First step of a proxy change, called once for all accounts before any
+	// account's proxyChanged(): advances the proxy epoch. A call that fails
+	// after the advance and started before it is a proxy-change failure.
+	static void beginProxyChange();
+
+	// The current proxy epoch; see beginProxyChange().
+	[[nodiscard]] static std::uint64_t proxyEpoch();
+
+	// Per-account part of a proxy change. The route is read again. When the
+	// proxy URL or the blocked state changed, the media pool and the sockets
+	// are destroyed and created again, and the lanes are subscribed again. When
+	// they did not change, the realtime socket is reconnected now. The waiting
+	// calls are released either way.
+	void proxyChanged();
+
+	// The network changed. Lanes are recomputed soon. A loss moves the state
+	// host to Disconnected; a return after a loss reconnects the realtime
+	// socket now and releases the waiting calls, as Android networkChanged.
+	void networkChanged(bool online);
+
+	// The app resumes: the network state is checked and the realtime socket
+	// connects now, as Android resume.
+	void resume(bool online);
 
 	// Sends one call. The done callback runs once on the main thread with the
 	// reply or the error. A call that needs a login waits for it. A call that
@@ -96,6 +152,7 @@ private:
 		std::vector<std::uint8_t> data)>;
 
 	[[nodiscard]] bool loginReady() const;
+	void bindUser(std::int64_t userId);
 	void releaseLoginWaiters();
 	void dispatch(
 		mtpRequestId requestId,
@@ -109,27 +166,51 @@ private:
 		const std::shared_ptr<PendingRequest> &pending,
 		CarrierOutcome outcome);
 	void callSocket(
-		CentrifugeClient &socket,
+		CentrifugeClient *socket,
 		CarrierKind carrier,
 		const std::string &method,
 		std::vector<std::uint8_t> payload,
 		std::int64_t timeoutMs,
 		SocketCallDone done);
 	void answerConnectionToken(std::uint64_t requestId);
+	void resolveUpdateToken(
+		std::uint64_t requestId,
+		CentrifugoTokenOutcome outcome,
+		const std::string &token);
+
+	// Builds the facades, the carrier and the media fleet for the route. A
+	// blocked route builds none: the carrier then fails every call at once.
+	void buildTransport(const TransportRoute &route);
+	void dropTransport();
+	void rebuildTransport(const TransportRoute &route);
+	void connectSockets();
+	void rebuildLanes();
+	[[nodiscard]] std::unique_ptr<LanesObserver> makeLanes();
+	void deliverUpdates(const std::vector<std::uint8_t> &updates);
+	void requestDifference(const std::string &reason);
 
 	ConnectionStateHost connectionState;
-	CentrifugeClient updateClient;
-	CentrifugeClient poolClient;
+	std::unique_ptr<CentrifugeClient> updateClient;
+	std::unique_ptr<CentrifugeClient> poolClient;
 	std::unique_ptr<MediaFleet> mediaFleet;
 	std::unique_ptr<RpcCarrier> rpcCarrier;
 	std::unique_ptr<SessionStore> sessionStore;
 	std::unique_ptr<TokenStore> identityStore;
 	std::unique_ptr<TokenManager> tokens;
 	std::unique_ptr<IdentityManager> identity;
+	std::unique_ptr<Realtime> realtime;
+	std::unique_ptr<LanesObserver> lanes;
+	UpdatesHandler updatesHandler;
 	std::map<mtpRequestId, std::shared_ptr<PendingRequest>> pendingRequests;
+	TransportRoute currentRoute;
+	std::vector<LaneCandidate> laneCandidates;
+	LaneIdentity laneIdentity;
+	std::int64_t openedChannelId = 0;
+	std::optional<std::string> mediaEndpoint;
 	std::int64_t userId = 0;
 	bool started = false;
-	bool dialAllowed = false;
+	bool mediaPublished = false;
+	bool networkLost = false;
 };
 
 } // namespace Impulse

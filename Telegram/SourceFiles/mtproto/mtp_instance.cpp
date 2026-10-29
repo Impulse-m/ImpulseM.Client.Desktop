@@ -477,6 +477,11 @@ void Instance::Private::start() {
 		impulseConnection = std::make_unique<Impulse::ImpulseConnection>(
 			std::move(*impulseStorage));
 		impulseStorage = nullptr;
+		// The realtime updates reach the updates handler as a push of the main
+		// session does, so the calls and the updates code see one stream.
+		impulseConnection->setUpdatesHandler([=](const Response &message) {
+			processUpdate(message);
+		});
 		impulseConnection->start(userId);
 		refreshImpulseMediaEndpoint();
 		dcOptions().changed() | rpl::on_next([=](DcId) {

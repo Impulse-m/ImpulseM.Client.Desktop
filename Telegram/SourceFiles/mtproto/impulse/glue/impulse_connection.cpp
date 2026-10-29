@@ -4,16 +4,23 @@
 #include "config.h"
 #include "core/application.h"
 #include "logs.h"
+#include "mtproto/impulse/core/mapping.h"
 #include "mtproto/impulse/core/method_classes.h"
 #include "mtproto/impulse/core/proxy_routing.h"
+#include "mtproto/impulse/core/transcoder.h"
 #include "mtproto/impulse/glue/carrier_errors.h"
 #include "mtproto/impulse/glue/media_pool_rust.h"
+#include "mtproto/impulse/glue/mtp_buffer_bridge.h"
+#include "settings.h"
 
+#include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -27,6 +34,20 @@ const std::string kRefreshSessionMethod = "refreshSession";
 
 // The code Android fails the login-only calls with when the login goes away.
 constexpr int kLoginLostErrorCode = -1000;
+
+// The reason of the difference request of a resubscribe without recovery.
+// Realtime names it the same way.
+constexpr std::string_view kSubscribeNotRecoveredReason = "subscribe_not_recovered";
+
+// Constructors of the TL objects that the realtime path hands to the updates
+// pipeline: updatesTooLong is a difference trigger there, and newSessionCreated
+// runs mtpNewSessionCreated.
+constexpr std::uint32_t kUpdatesTooLongConstructor = 0xe317af7e;
+constexpr std::uint32_t kNewSessionCreatedConstructor = 0x9ec20908;
+
+// The three int64 fields of newSessionCreated. The updates pipeline reads only
+// the constructor of that object, so the fields are written as zeros.
+constexpr std::size_t kNewSessionCreatedTailBytes = 24;
 
 // The endpoint of the proxy as the Rust client takes it: http://host:port
 // for HTTP CONNECT, empty when the traffic goes direct.
@@ -51,6 +72,87 @@ constexpr int kLoginLostErrorCode = -1000;
 	return static_cast<std::int64_t>(
 		std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+// The proxy epoch of the process. It advances once per proxy change.
+std::atomic<std::uint64_t> proxyEpochCounter{ 0 };
+
+// A TL object of the given constructor followed by zero bytes of its fields.
+[[nodiscard]] std::vector<std::uint8_t> ConstructorBytes(
+		std::uint32_t constructor,
+		std::size_t tailBytes) {
+	std::vector<std::uint8_t> bytes(4 + tailBytes, 0);
+	bytes[0] = static_cast<std::uint8_t>(constructor & 0xff);
+	bytes[1] = static_cast<std::uint8_t>((constructor >> 8) & 0xff);
+	bytes[2] = static_cast<std::uint8_t>((constructor >> 16) & 0xff);
+	bytes[3] = static_cast<std::uint8_t>((constructor >> 24) & 0xff);
+	return bytes;
+}
+
+// The route of the sockets as of now. A routing state that cannot be read,
+// because the core is not up, counts as blocked: nothing dials then.
+[[nodiscard]] TransportRoute ReadRoute() {
+	TransportRoute route;
+	if (!Core::IsAppLaunched()) {
+		return route;
+	}
+	const std::optional<ProxyRouting::HttpEndpoint> endpoint
+		= Core::App().impulseHttpEndpoint();
+	route.blocked = IsBlackhole(endpoint);
+	if (!route.blocked) {
+		route.proxyUrl = ProxyUrlOf(endpoint);
+	}
+	return route;
+}
+
+[[nodiscard]] bool SameRoute(
+		const TransportRoute &first,
+		const TransportRoute &second) {
+	return first.blocked == second.blocked
+		&& first.proxyUrl == second.proxyUrl;
+}
+
+// The mapping codec of the realtime decode path. The session glue has its own
+// codec; this one is loaded once per process from the same file.
+struct ConnectionCodec final {
+	explicit ConnectionCodec(MappingTable source)
+	: table(std::move(source))
+	, transcoder(table) {
+	}
+
+	MappingTable table;
+	Transcoder transcoder;
+};
+
+[[nodiscard]] const Transcoder *SharedTranscoder() {
+	static const std::unique_ptr<ConnectionCodec> codec = []()
+			-> std::unique_ptr<ConnectionCodec> {
+		std::string error;
+		const std::string path
+			= (cExeDir() + "impulse/tl-proto-232.json.gz").toStdString();
+		std::optional<MappingTable> table = MappingTable::LoadGzipFile(
+			path,
+			&error);
+		if (!table) {
+			LOG(("ImpulseM Error: mapping was not loaded for realtime: %1."
+				).arg(QString::fromStdString(error)));
+			return nullptr;
+		}
+		return std::make_unique<ConnectionCodec>(std::move(*table));
+	}();
+	return codec ? &codec->transcoder : nullptr;
+}
+
+// The timer of the carrier and of the token and identity managers: a task runs
+// on the main thread after the delay, and never once the connection is gone.
+[[nodiscard]] RpcCarrierScheduler MakeScheduler(
+		const base::weak_ptr<ImpulseConnection> &weak) {
+	return [weak](std::int64_t delayMs, std::function<void()> task) {
+		base::call_delayed(
+			static_cast<crl::time>(delayMs),
+			weak,
+			std::move(task));
+	};
 }
 
 // The session pair of the account, through the three callbacks the account
@@ -94,67 +196,6 @@ private:
 } // namespace
 
 ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
-	const std::optional<ProxyRouting::HttpEndpoint> endpoint
-		= Core::App().impulseHttpEndpoint();
-	dialAllowed = !IsBlackhole(endpoint);
-	const std::string proxyUrl = ProxyUrlOf(endpoint);
-
-	// Socket callbacks come from the Rust runtime threads: they are handed to
-	// the main thread, and they do nothing once this connection is gone.
-	const base::weak_ptr<ImpulseConnection> weak = base::make_weak(this);
-	const CentrifugoRust::Poster poster = [weak](std::function<void()> task) {
-		crl::on_main(weak, [task = std::move(task)] {
-			task();
-		});
-	};
-	const RpcCarrierScheduler schedule = [weak](
-			std::int64_t delayMs,
-			std::function<void()> task) {
-		base::call_delayed(
-			static_cast<crl::time>(delayMs),
-			weak,
-			std::move(task));
-	};
-
-	CentrifugoConfig updateConfig;
-	updateConfig.proxyUrl = proxyUrl;
-	const std::int32_t updateStatus = updateClient.create(
-		CentrifugeFleet::Update,
-		updateConfig,
-		poster,
-		&connectionState);
-	if (updateStatus != kCentrifugoStatusOk) {
-		LOG(("ImpulseM Error: update client was not created, status %1.").arg(updateStatus));
-	}
-
-	CentrifugoConfig poolConfig;
-	poolConfig.proxyUrl = proxyUrl;
-	const std::int32_t poolStatus = poolClient.create(
-		CentrifugeFleet::Pool,
-		poolConfig,
-		poster,
-		nullptr);
-	if (poolStatus != kCentrifugoStatusOk) {
-		LOG(("ImpulseM Error: pool client was not created, status %1.").arg(poolStatus));
-	}
-
-	// The media pool is built on the update client, which owns the socket it
-	// shares its token with. Without that client there is no media fleet.
-	CentrifugoRust *const updateRust = updateClient.rustClient();
-	if (updateRust) {
-		MediaFleetDependencies mediaDependencies;
-		mediaDependencies.createPool = makeRustMediaPoolFactory(updateRust);
-		mediaDependencies.schedule = schedule;
-		mediaFleet = std::make_unique<MediaFleet>(std::move(mediaDependencies));
-	}
-
-	RpcCarrierDependencies carrierDependencies;
-	carrierDependencies.update = &updateClient;
-	carrierDependencies.pool = &poolClient;
-	carrierDependencies.media = mediaFleet.get();
-	carrierDependencies.schedule = schedule;
-	rpcCarrier = std::make_unique<RpcCarrier>(std::move(carrierDependencies));
-
 	// The session pair goes to the account blob, the identity token to its own
 	// file. Loading them does not dial.
 	sessionStore = std::make_unique<AccountSessionStore>(
@@ -171,7 +212,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 
 	TokenManagerDependencies tokenDependencies;
 	tokenDependencies.store = sessionStore.get();
-	tokenDependencies.schedule = schedule;
+	tokenDependencies.schedule = MakeScheduler(base::make_weak(this));
 	tokenDependencies.nowMs = NowMs;
 	tokenDependencies.random = random;
 	tokens = std::make_unique<TokenManager>(std::move(tokenDependencies));
@@ -185,7 +226,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 			std::int64_t timeoutMs,
 			ConnectionIdentityDone done) {
 		callSocket(
-			poolClient,
+			poolClient.get(),
 			CarrierKind::Pool,
 			kConnectionIdentityMethod,
 			std::move(payload),
@@ -199,7 +240,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 				});
 			});
 	};
-	identityDependencies.schedule = schedule;
+	identityDependencies.schedule = MakeScheduler(base::make_weak(this));
 	identityDependencies.nowMs = NowMs;
 	identityDependencies.random = random;
 	identity = std::make_unique<IdentityManager>(std::move(identityDependencies));
@@ -209,7 +250,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 			std::int64_t timeoutMs,
 			ConnectionIdentityDone done) {
 		callSocket(
-			updateClient,
+			updateClient.get(),
 			CarrierKind::Update,
 			kConnectionIdentityMethod,
 			std::move(payload),
@@ -230,7 +271,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 				std::int64_t timeoutMs,
 				RefreshCarrierDone done) {
 			callSocket(
-				updateClient,
+				updateClient.get(),
 				CarrierKind::Update,
 				kRefreshSessionMethod,
 				std::move(payload),
@@ -249,7 +290,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 				std::int64_t timeoutMs,
 				RefreshCarrierDone done) {
 			callSocket(
-				poolClient,
+				poolClient.get(),
 				CarrierKind::Pool,
 				kRefreshSessionMethod,
 				std::move(payload),
@@ -277,21 +318,31 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 		releaseLoginWaiters();
 	});
 
-	// The update socket connects with the session access token, or with the
-	// identity token while there is no session. The media pool presents the
-	// same token (tokenFrom), so the update socket is the only one that asks.
-	static_cast<void>(updateClient.setTokenCallback(
-		[this](const CentrifugoTokenRequest &request) {
-			if (request.kind != CentrifugoTokenKind::Connection) {
-				// Channel tokens are not used: subscriptions carry none.
-				static_cast<void>(updateClient.resolveToken(
-					request.requestId,
-					CentrifugoTokenOutcome::Anonymous,
-					std::string()));
-				return;
-			}
-			answerConnectionToken(request.requestId);
-		}));
+	// The realtime decode path of the account. Every decoded update goes to the
+	// updates handler; a difference trigger is turned into the TL object that
+	// the updates pipeline reads as one. The realtime path is off when the
+	// mapping is not loaded, and then no lane carries updates.
+	if (const Transcoder *const transcoder = SharedTranscoder()) {
+		realtime = std::make_unique<Realtime>(
+			*transcoder,
+			[this](const std::vector<std::uint8_t> &updates) {
+				deliverUpdates(updates);
+			},
+			[this](const std::string &reason, const std::string &channel) {
+				// A channel gap falls back to the account difference, as
+				// Realtime documents; the channel name does not change it.
+				static_cast<void>(channel);
+				requestDifference(reason);
+			},
+			[this]() {
+				if (lanes) {
+					lanes->requestRecompute();
+				}
+			});
+	}
+	lanes = makeLanes();
+
+	buildTransport(ReadRoute());
 }
 
 ImpulseConnection::~ImpulseConnection() {
@@ -304,36 +355,40 @@ ImpulseConnection::~ImpulseConnection() {
 		entry.second->cancelled = true;
 	}
 	pendingRequests.clear();
-	rpcCarrier->close();
-	if (mediaFleet) {
-		mediaFleet->close();
-	}
-	poolClient.close();
-	updateClient.close();
+	lanes.reset();
+	dropTransport();
+}
+
+void ImpulseConnection::setUpdatesHandler(UpdatesHandler handler) {
+	updatesHandler = std::move(handler);
 }
 
 void ImpulseConnection::start(std::int64_t userIdValue) {
-	userId = userIdValue;
+	bindUser(userIdValue);
 	if (started) {
 		releaseLoginWaiters();
 		return;
 	}
 	started = true;
-	if (!dialAllowed) {
-		return;
+
+	// The route is read again: a route that changed since the connection was
+	// built is applied before anything dials.
+	const TransportRoute route = ReadRoute();
+	if (!SameRoute(route, currentRoute)) {
+		rebuildTransport(route);
 	}
-	static_cast<void>(updateClient.connect());
-	static_cast<void>(poolClient.connect());
+	lanes->start();
+	connectSockets();
 }
 
 void ImpulseConnection::setUserId(std::int64_t userIdValue) {
-	userId = userIdValue;
+	bindUser(userIdValue);
 	releaseLoginWaiters();
 }
 
 void ImpulseConnection::cleanup(bool resetKeys) {
 	const bool hadUser = (userId != 0);
-	userId = 0;
+	bindUser(0);
 
 	std::vector<std::pair<mtpRequestId, std::shared_ptr<PendingRequest>>> victims;
 	for (const std::pair<const mtpRequestId, std::shared_ptr<PendingRequest>> &entry
@@ -362,8 +417,72 @@ void ImpulseConnection::cleanup(bool resetKeys) {
 void ImpulseConnection::setMediaOptions(
 		const std::vector<MediaDcOption> &options,
 		int thisDc) {
+	mediaEndpoint = mediaEndpointFor(options, thisDc);
+	mediaPublished = true;
 	if (mediaFleet) {
-		mediaFleet->setEndpoint(mediaEndpointFor(options, thisDc));
+		mediaFleet->setEndpoint(mediaEndpoint);
+	}
+}
+
+void ImpulseConnection::setLanes(
+		std::vector<LaneCandidate> candidates,
+		std::int64_t openedChannelIdValue) {
+	laneCandidates = std::move(candidates);
+	openedChannelId = openedChannelIdValue;
+	if (lanes) {
+		lanes->setOpenedChannel(openedChannelId);
+	}
+}
+
+void ImpulseConnection::beginProxyChange() {
+	proxyEpochCounter.fetch_add(1);
+}
+
+std::uint64_t ImpulseConnection::proxyEpoch() {
+	return proxyEpochCounter.load();
+}
+
+void ImpulseConnection::proxyChanged() {
+	const TransportRoute route = ReadRoute();
+	if (!SameRoute(route, currentRoute)) {
+		// The sockets take the proxy URL only at create time, so they are
+		// created again. The state moves to Disconnected until they connect.
+		if (started) {
+			connectionState.onNetworkLost();
+		}
+		rebuildTransport(route);
+		if (started) {
+			connectSockets();
+		}
+	} else if (started && updateClient) {
+		static_cast<void>(updateClient->reconnectNow());
+	}
+	releaseLoginWaiters();
+}
+
+void ImpulseConnection::networkChanged(bool online) {
+	if (lanes) {
+		lanes->requestRecompute();
+	}
+	if (!online) {
+		networkLost = true;
+		connectionState.onNetworkLost();
+		return;
+	}
+	if (!networkLost) {
+		return;
+	}
+	networkLost = false;
+	if (started && updateClient) {
+		static_cast<void>(updateClient->reconnectNow());
+	}
+	releaseLoginWaiters();
+}
+
+void ImpulseConnection::resume(bool online) {
+	networkChanged(online);
+	if (started && updateClient) {
+		static_cast<void>(updateClient->reconnectNow());
 	}
 }
 
@@ -399,7 +518,7 @@ void ImpulseConnection::cancel(mtpRequestId requestId) {
 	const std::shared_ptr<PendingRequest> pending = found->second;
 	pendingRequests.erase(found);
 	pending->cancelled = true;
-	if (!pending->settled) {
+	if (!pending->settled && rpcCarrier) {
 		// The carrier settles the call with a network failure, which is
 		// dropped here because the call is cancelled. A call that still waits
 		// for the login has no carrier call: the cancel of id 0 is ignored.
@@ -409,6 +528,14 @@ void ImpulseConnection::cancel(mtpRequestId requestId) {
 
 bool ImpulseConnection::loginReady() const {
 	return (userId != 0) && tokens->hasSession();
+}
+
+void ImpulseConnection::bindUser(std::int64_t userIdValue) {
+	userId = userIdValue;
+	laneIdentity.userId = userIdValue;
+	if (lanes) {
+		lanes->setIdentity(laneIdentity);
+	}
 }
 
 void ImpulseConnection::releaseLoginWaiters() {
@@ -442,6 +569,14 @@ void ImpulseConnection::dispatch(
 	// router refuses the login-only methods of a signed-in socket, and every
 	// method outside the identity set on a signed-out one.
 	request.route.signedIn = loginReady();
+
+	if (!rpcCarrier) {
+		// No carrier while the transport is being rebuilt or the route is
+		// blocked: the call fails as a network failure at once.
+		RpcCarrierReply reply;
+		settle(requestId, pending, std::move(reply));
+		return;
+	}
 
 	// The carrier may settle the call before send() returns, for a refusal.
 	const std::uint64_t callId = rpcCarrier->send(
@@ -479,7 +614,7 @@ void ImpulseConnection::failPending(
 	pending->cancelled = true;
 	RpcCarrierDone done = std::move(pending->done);
 	pending->done = nullptr;
-	if (!pending->settled && !pending->waitingLogin) {
+	if (!pending->settled && !pending->waitingLogin && rpcCarrier) {
 		rpcCarrier->cancel(pending->carrierCallId);
 	}
 	if (done) {
@@ -490,18 +625,27 @@ void ImpulseConnection::failPending(
 }
 
 void ImpulseConnection::callSocket(
-		CentrifugeClient &socket,
+		CentrifugeClient *socket,
 		CarrierKind carrier,
 		const std::string &method,
 		std::vector<std::uint8_t> payload,
 		std::int64_t timeoutMs,
 		SocketCallDone done) {
+	if (!socket) {
+		// No socket is built for a blocked route: the call fails as a network
+		// failure, and nothing dials.
+		CarrierOutcome outcome;
+		outcome.kind = CarrierOutcomeKind::NetworkFailure;
+		done(std::move(outcome), {});
+		return;
+	}
+
 	CentrifugoRpcRequest request;
 	request.method = method;
 	request.data = std::move(payload);
 	request.timeoutMs = static_cast<std::uint32_t>(timeoutMs);
 
-	const std::int32_t status = socket.rpc(
+	const std::int32_t status = socket->rpc(
 		request,
 		[carrier, done](const CentrifugoResult &result) {
 			CarrierOutcome outcome = mapCarrierResult(result, carrier);
@@ -523,43 +667,222 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 	if (tokens->hasSession()) {
 		tokens->connectionToken([this, requestId](ConnectionTokenResult result) {
 			if (result.status == RefreshStatus::Fresh && !result.token.empty()) {
-				static_cast<void>(updateClient.resolveToken(
+				resolveUpdateToken(
 					requestId,
 					CentrifugoTokenOutcome::Token,
-					result.token));
+					result.token);
 				return;
 			}
 			const CentrifugoTokenOutcome outcome = (result.status == RefreshStatus::Ended)
 				? CentrifugoTokenOutcome::Unauthorized
 				: CentrifugoTokenOutcome::Failed;
-			static_cast<void>(updateClient.resolveToken(
-				requestId,
-				outcome,
-				std::string()));
+			resolveUpdateToken(requestId, outcome, std::string());
 		});
 		return;
 	}
 	const std::string current = identity->current();
 	if (!current.empty()) {
-		static_cast<void>(updateClient.resolveToken(
-			requestId,
-			CentrifugoTokenOutcome::Token,
-			current));
+		resolveUpdateToken(requestId, CentrifugoTokenOutcome::Token, current);
 		return;
 	}
 	identity->obtain([this, requestId](IdentityObtainResult result) {
 		if (!result.token.empty()) {
-			static_cast<void>(updateClient.resolveToken(
-				requestId,
-				CentrifugoTokenOutcome::Token,
-				result.token));
+			resolveUpdateToken(requestId, CentrifugoTokenOutcome::Token, result.token);
 			return;
 		}
-		static_cast<void>(updateClient.resolveToken(
-			requestId,
-			CentrifugoTokenOutcome::Failed,
-			std::string()));
+		resolveUpdateToken(requestId, CentrifugoTokenOutcome::Failed, std::string());
 	});
+}
+
+void ImpulseConnection::resolveUpdateToken(
+		std::uint64_t requestId,
+		CentrifugoTokenOutcome outcome,
+		const std::string &token) {
+	if (updateClient) {
+		static_cast<void>(updateClient->resolveToken(requestId, outcome, token));
+	}
+}
+
+void ImpulseConnection::buildTransport(const TransportRoute &route) {
+	currentRoute = route;
+	const base::weak_ptr<ImpulseConnection> weak = base::make_weak(this);
+	const RpcCarrierScheduler schedule = MakeScheduler(weak);
+
+	if (!route.blocked) {
+		// Socket callbacks come from the Rust runtime threads: they are handed
+		// to the main thread, and they do nothing once this connection is gone.
+		const CentrifugoRust::Poster poster = [weak](std::function<void()> task) {
+			crl::on_main(weak, [task = std::move(task)] {
+				task();
+			});
+		};
+
+		CentrifugoConfig updateConfig;
+		updateConfig.proxyUrl = route.proxyUrl;
+		updateClient = std::make_unique<CentrifugeClient>();
+		const std::int32_t updateStatus = updateClient->create(
+			CentrifugeFleet::Update,
+			updateConfig,
+			poster,
+			&connectionState);
+		if (updateStatus != kCentrifugoStatusOk) {
+			LOG(("ImpulseM Error: update client was not created, status %1.").arg(updateStatus));
+		}
+
+		CentrifugoConfig poolConfig;
+		poolConfig.proxyUrl = route.proxyUrl;
+		poolClient = std::make_unique<CentrifugeClient>();
+		const std::int32_t poolStatus = poolClient->create(
+			CentrifugeFleet::Pool,
+			poolConfig,
+			poster,
+			nullptr);
+		if (poolStatus != kCentrifugoStatusOk) {
+			LOG(("ImpulseM Error: pool client was not created, status %1.").arg(poolStatus));
+		}
+
+		// The update socket connects with the session access token, or with the
+		// identity token while there is no session. The media pool presents the
+		// same token (tokenFrom), so the update socket is the only one that asks.
+		static_cast<void>(updateClient->setTokenCallback(
+			[this](const CentrifugoTokenRequest &request) {
+				if (request.kind != CentrifugoTokenKind::Connection) {
+					// Channel tokens are not used: subscriptions carry none.
+					resolveUpdateToken(
+						request.requestId,
+						CentrifugoTokenOutcome::Anonymous,
+						std::string());
+					return;
+				}
+				answerConnectionToken(request.requestId);
+			}));
+
+		// The media pool is built on the update client, which owns the socket it
+		// shares its token with. Without that client there is no media fleet.
+		CentrifugoRust *const updateRust = updateClient->rustClient();
+		if (updateRust) {
+			MediaFleetDependencies mediaDependencies;
+			mediaDependencies.createPool = makeRustMediaPoolFactory(updateRust);
+			mediaDependencies.schedule = schedule;
+			mediaFleet = std::make_unique<MediaFleet>(std::move(mediaDependencies));
+			if (mediaPublished) {
+				mediaFleet->setEndpoint(mediaEndpoint);
+			}
+		}
+	}
+
+	RpcCarrierDependencies carrierDependencies;
+	carrierDependencies.update = updateClient.get();
+	carrierDependencies.pool = poolClient.get();
+	carrierDependencies.media = mediaFleet.get();
+	carrierDependencies.schedule = schedule;
+	rpcCarrier = std::make_unique<RpcCarrier>(std::move(carrierDependencies));
+}
+
+void ImpulseConnection::dropTransport() {
+	// The carrier settles its open calls with network failures while it closes.
+	// A call sent from one of those callbacks finds no carrier and fails the
+	// same way, so the carrier is taken out before it is closed.
+	const std::unique_ptr<RpcCarrier> carrier = std::move(rpcCarrier);
+	if (carrier) {
+		carrier->close();
+	}
+
+	const std::unique_ptr<MediaFleet> media = std::move(mediaFleet);
+	if (media) {
+		media->close();
+	}
+
+	// The pool goes before the update client, as the destructor does.
+	const std::unique_ptr<CentrifugeClient> pool = std::move(poolClient);
+	if (pool) {
+		pool->close();
+	}
+
+	const std::unique_ptr<CentrifugeClient> update = std::move(updateClient);
+	if (update) {
+		update->close();
+	}
+}
+
+void ImpulseConnection::rebuildTransport(const TransportRoute &route) {
+	dropTransport();
+	buildTransport(route);
+	rebuildLanes();
+}
+
+void ImpulseConnection::connectSockets() {
+	if (currentRoute.blocked) {
+		return;
+	}
+	if (updateClient) {
+		static_cast<void>(updateClient->connect());
+	}
+	if (poolClient) {
+		static_cast<void>(poolClient->connect());
+	}
+}
+
+void ImpulseConnection::rebuildLanes() {
+	// The lanes observer keeps the lanes it subscribed on the client it had.
+	// A new client has none, so the observer is built again and started again
+	// when it was running.
+	const bool wasActive = lanes && lanes->isActive();
+	lanes = makeLanes();
+	lanes->setIdentity(laneIdentity);
+	if (wasActive) {
+		lanes->start();
+	}
+}
+
+std::unique_ptr<LanesObserver> ImpulseConnection::makeLanes() {
+	const base::weak_ptr<ImpulseConnection> weak = base::make_weak(this);
+	return std::make_unique<LanesObserver>(
+		[this]() -> std::vector<LaneCandidate> {
+			return laneCandidates;
+		},
+		[this](const std::string &lane) {
+			if (updateClient && realtime) {
+				static_cast<void>(realtime->subscribe(*updateClient, lane));
+			}
+		},
+		[this](const std::string &lane) {
+			if (updateClient && realtime) {
+				static_cast<void>(realtime->unsubscribe(*updateClient, lane));
+			}
+		},
+		[weak](std::chrono::milliseconds delay, std::function<void()> task) {
+			base::call_delayed(
+				static_cast<crl::time>(delay.count()),
+				weak,
+				std::move(task));
+		});
+}
+
+void ImpulseConnection::deliverUpdates(const std::vector<std::uint8_t> &updates) {
+	if (!updatesHandler) {
+		return;
+	}
+	MTP::Response response;
+	try {
+		response.reply = TlBytesToBuffer<mtpBuffer>(updates);
+	} catch (const MtpBufferBridgeError &) {
+		// A stream that is not whole words cannot be read. It is replaced by a
+		// difference trigger, which the pipeline reads as a whole object.
+		deliverUpdates(ConstructorBytes(kUpdatesTooLongConstructor, 0));
+		return;
+	}
+	updatesHandler(response);
+}
+
+void ImpulseConnection::requestDifference(const std::string &reason) {
+	if (reason == kSubscribeNotRecoveredReason) {
+		deliverUpdates(ConstructorBytes(
+			kNewSessionCreatedConstructor,
+			kNewSessionCreatedTailBytes));
+		return;
+	}
+	deliverUpdates(ConstructorBytes(kUpdatesTooLongConstructor, 0));
 }
 
 } // namespace Impulse

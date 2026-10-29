@@ -624,16 +624,6 @@ void Instance::handleUpdate(
 	});
 }
 
-void Instance::handleRealtimeUpdate(
-		not_null<Main::Session*> session,
-		const MTPUpdate &update) {
-	if (update.type() == mtpc_updatePhoneCall) {
-		handleCallUpdate(session, update.c_updatePhoneCall().vphone_call());
-	} else if (update.type() == mtpc_updatePhoneCallSignalingData) {
-		handleSignalingData(session, update.c_updatePhoneCallSignalingData());
-	}
-}
-
 void Instance::showInfoPanel(not_null<Call*> call) {
 	if (_currentCall.get() == call) {
 		_currentCallPanel->showAndActivate();

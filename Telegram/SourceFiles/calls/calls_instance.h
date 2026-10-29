@@ -101,13 +101,6 @@ public:
 		not_null<Main::Session*> session,
 		const MTPUpdate &update);
 
-	// Routes a 1:1 call update that arrived on the realtime path (the session
-	// lane of the account) to the call manager. Only updatePhoneCall and
-	// updatePhoneCallSignalingData are taken, and no difference is requested.
-	void handleRealtimeUpdate(
-		not_null<Main::Session*> session,
-		const MTPUpdate &update);
-
 	// Called by Data::GroupCall when it is appropriate by the 'version'.
 	void applyGroupCallUpdateChecked(
 		not_null<Main::Session*> session,

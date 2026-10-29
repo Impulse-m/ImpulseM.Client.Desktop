@@ -18,7 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class History;
 
 namespace tgcalls {
-class GroupInstanceCustomImpl;
+class GroupInstanceInterface;
 struct GroupLevelsUpdate;
 struct GroupNetworkState;
 struct GroupParticipantDescription;
@@ -748,7 +748,7 @@ private:
 		= InstanceState::Disconnected;
 	bool _instanceTransitioning = false;
 	InstanceMode _instanceMode = InstanceMode::None;
-	std::unique_ptr<tgcalls::GroupInstanceCustomImpl> _instance;
+	std::unique_ptr<tgcalls::GroupInstanceInterface> _instance;
 	base::has_weak_ptr _instanceGuard;
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _cameraCapture;
 	rpl::variable<Webrtc::VideoState> _cameraState;
@@ -758,7 +758,7 @@ private:
 	rpl::variable<InstanceState> _screenInstanceState
 		= InstanceState::Disconnected;
 	InstanceMode _screenInstanceMode = InstanceMode::None;
-	std::unique_ptr<tgcalls::GroupInstanceCustomImpl> _screenInstance;
+	std::unique_ptr<tgcalls::GroupInstanceInterface> _screenInstance;
 	base::has_weak_ptr _screenInstanceGuard;
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _screenCapture;
 	rpl::variable<Webrtc::VideoState> _screenState;

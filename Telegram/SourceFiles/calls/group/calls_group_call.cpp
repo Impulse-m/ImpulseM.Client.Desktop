@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "calls/group/calls_group_common.h"
 #include "calls/group/calls_group_messages.h"
+#include "calls/group/livekit_group_instance.h"
 #include "calls/calls_instance.h"
 #include "main/session/session_show.h"
 #include "main/main_app_config.h"
@@ -40,9 +41,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_create_adm.h"
 #include "webrtc/webrtc_environment.h"
 
-#include <tgcalls/group/GroupInstanceCustomImpl.h>
 #include <tgcalls/VideoCaptureInterface.h>
 #include <tgcalls/StaticThreads.h>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QDir>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonArray>
@@ -86,46 +88,24 @@ constexpr auto kShortPollChainBlocksPerRequest = 50;
 	return (i == end(list)) ? 1 : (i->raisedHandRating + 1);
 }
 
-struct JoinVideoEndpoint {
-	std::string id;
-};
-
-struct JoinBroadcastStream {
-	bool rtmp = false;
-	Group::RtmpInfo rtmpInfo;
-};
-
-using JoinClientFields = std::variant<
-	v::null_t,
-	JoinVideoEndpoint,
-	JoinBroadcastStream>;
-
-[[nodiscard]] JoinClientFields ParseJoinResponse(const QByteArray &json) {
-	auto error = QJsonParseError{ 0, QJsonParseError::NoError };
-	const auto document = QJsonDocument::fromJson(json, &error);
-	if (error.error != QJsonParseError::NoError) {
-		LOG(("API Error: "
-			"Failed to parse join response params, error: %1."
-			).arg(error.errorString()));
-		return {};
-	} else if (!document.isObject()) {
-		LOG(("API Error: "
-			"Not an object received in join response params."));
-		return {};
+// The own video endpoints come from the participant update. The join response
+// of LiveKit carries connection parameters only, it is never parsed for them.
+[[nodiscard]] std::string VideoEndpointId(
+		const tl::conditional<MTPGroupCallParticipantVideo> &params) {
+	if (!params) {
+		return std::string();
 	}
-	if (document.object().value("stream").toBool()) {
-		return JoinBroadcastStream{
-			.rtmp = document.object().value("rtmp").toBool(),
-			.rtmpInfo = {
-				.url = document.object().value("rtmp_stream_url").toString(),
-				.key = document.object().value("rtmp_stream_key").toString(),
-			},
-		};
-	}
-	const auto video = document.object().value("video").toObject();
-	return JoinVideoEndpoint{
-		video.value("endpoint").toString().toStdString(),
-	};
+	auto result = std::string();
+	params->match([&](const MTPDgroupCallParticipantVideo &data) {
+		result = data.vendpoint().v.toStdString();
+	});
+	return result;
+}
+
+[[nodiscard]] std::wstring LiveKitDllPath() {
+	return QDir::toNativeSeparators(
+		QCoreApplication::applicationDirPath()
+		+ u"/modules/x64/livekit/livekit_ffi.dll"_q).toStdWString();
 }
 
 [[nodiscard]] const std::string &EmptyString() {
@@ -2396,14 +2376,8 @@ void GroupCall::handlePossibleCreateOrJoinResponse(
 		}
 		setScreenInstanceMode(InstanceMode::Rtc);
 		data.vparams().match([&](const MTPDdataJSON &data) {
+			// The screen endpoint comes from the participant update.
 			const auto json = data.vdata().v;
-			const auto response = ParseJoinResponse(json);
-			const auto endpoint = std::get_if<JoinVideoEndpoint>(&response);
-			if (endpoint) {
-				setScreenEndpoint(endpoint->id);
-			} else {
-				LOG(("Call Error: Bad response for 'presentation' flag."));
-			}
 			_screenInstance->setJoinResponsePayload(json.toStdString());
 		});
 	} else {
@@ -2411,26 +2385,9 @@ void GroupCall::handlePossibleCreateOrJoinResponse(
 			return;
 		}
 		data.vparams().match([&](const MTPDdataJSON &data) {
-			const auto json = data.vdata().v;
-			const auto response = ParseJoinResponse(json);
-			const auto stream = std::get_if<JoinBroadcastStream>(&response);
-			const auto endpoint = std::get_if<JoinVideoEndpoint>(&response);
-			if (stream) {
-				if (!_broadcastDcId) {
-					LOG(("Api Error: Empty stream_dc_id in groupCall."));
-					_broadcastDcId = _peer->session().mtp().mainDcId();
-				}
-				if (stream->rtmp) {
-					_rtmp = true;
-					_rtmpUrl = stream->rtmpInfo.url;
-					_rtmpKey = stream->rtmpInfo.key;
-				}
-				setInstanceMode(InstanceMode::Stream);
-			} else {
-				setInstanceMode(InstanceMode::Rtc);
-				setCameraEndpoint(endpoint ? endpoint->id : std::string());
-				_instance->setJoinResponsePayload(json.toStdString());
-			}
+			// The camera endpoint comes from the participant update.
+			setInstanceMode(InstanceMode::Rtc);
+			_instance->setJoinResponsePayload(data.vdata().v.toStdString());
 			updateInstanceVolumes();
 			fillActiveVideoEndpoints();
 			updateRequestedVideoChannels();
@@ -2640,6 +2597,12 @@ void GroupCall::applySelfUpdate(const MTPDgroupCallParticipant &data) {
 				).arg(_joinState.ssrc));
 		}
 		return;
+	}
+	if (!data.is_min()) {
+		// My video endpoints come from the participant update, the server
+		// sets them there and the join response never carries them.
+		setCameraEndpoint(VideoEndpointId(data.vvideo()));
+		setScreenEndpoint(VideoEndpointId(data.vpresentation()));
 	}
 	if (data.is_muted() && !data.is_can_self_unmute()) {
 		setMuted(data.vraise_hand_rating().value_or_empty()
@@ -3143,8 +3106,13 @@ bool GroupCall::tryCreateController() {
 	}
 
 	LOG(("Call Info: Creating group instance"));
-	_instance = std::make_unique<tgcalls::GroupInstanceCustomImpl>(
-		std::move(descriptor));
+	_instance = std::make_unique<Impulse::LiveKitGroupInstance>(
+		std::move(descriptor),
+		Impulse::LiveKitGroupParams{
+			.dllPath = LiveKitDllPath(),
+			.groupCallId = _id,
+			.presentation = false,
+		});
 
 	updateInstanceMuteState();
 	updateInstanceVolumes();
@@ -3179,8 +3147,13 @@ bool GroupCall::tryCreateScreencast() {
 	};
 
 	LOG(("Call Info: Creating group screen instance"));
-	_screenInstance = std::make_unique<tgcalls::GroupInstanceCustomImpl>(
-		std::move(descriptor));
+	_screenInstance = std::make_unique<Impulse::LiveKitGroupInstance>(
+		std::move(descriptor),
+		Impulse::LiveKitGroupParams{
+			.dllPath = LiveKitDllPath(),
+			.groupCallId = _id,
+			.presentation = true,
+		});
 
 	_screenInstance->setIsMuted(!_screenWithAudio);
 

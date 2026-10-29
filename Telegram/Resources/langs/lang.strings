@@ -9392,5 +9392,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_impulse_proxy_list_error_network" = "The subscription could not be downloaded.";
 "lng_impulse_proxy_list_error_invalid" = "The subscription is invalid or too large.";
 "lng_impulse_proxy_list_error_no_links" = "The subscription has no vless:// servers.";
+"lng_impulse_proxy_edit_title" = "Edit server";
+"lng_impulse_proxy_edit_name" = "Name";
+"lng_impulse_proxy_edit_link" = "vless:// link";
+"lng_impulse_proxy_edit_address" = "Address: {address}";
+"lng_impulse_proxy_edit_check" = "Check";
+"lng_impulse_proxy_edit_use" = "Use this server";
 
 // Keys finished

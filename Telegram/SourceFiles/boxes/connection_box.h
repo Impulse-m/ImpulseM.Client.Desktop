@@ -88,6 +88,7 @@ public:
 		bool canOpenBrowser = false;
 		bool refreshable = false;
 		bool deletable = false;
+		bool editable = false;
 		ItemState state = ItemState::Checking;
 
 	};
@@ -105,6 +106,14 @@ public:
 	void shareImpulseServer(const std::string &id, bool qr);
 	void shareImpulseList();
 	void checkImpulseServers();
+	void checkImpulseServer(const std::string &id);
+	void editImpulseServer(
+		const std::string &id,
+		const std::string &name,
+		const std::string &shareLink);
+	void applyImpulseServer(const std::string &id);
+	[[nodiscard]] std::optional<Impulse::ProxyState::Server> impulseManualServer(
+		const std::string &id) const;
 	[[nodiscard]] bool impulseChecking() const;
 	[[nodiscard]] std::optional<std::int64_t> impulsePing(
 		const std::string &id) const;
@@ -115,10 +124,7 @@ public:
 	void restoreItem(int id);
 	void shareItem(int id, bool qr);
 	void shareItems();
-	void applyItem(int id);
 	void openBrowser(int id);
-	object_ptr<Ui::BoxContent> editItemBox(int id);
-	object_ptr<Ui::BoxContent> addNewItemBox();
 	bool setProxySettings(ProxyData::Settings value);
 	bool setProxyForCalls(bool enabled);
 	void setProxyRotationEnabled(bool enabled);
@@ -127,7 +133,6 @@ public:
 	rpl::producer<ProxyData::Settings> proxySettingsValue() const;
 
 	[[nodiscard]] bool contains(const ProxyData &proxy) const;
-	void addNewItem(const ProxyData &proxy);
 
 	rpl::producer<ItemView> views() const;
 
@@ -168,13 +173,13 @@ private:
 		const std::vector<Impulse::ProxyState::Server> &servers,
 		const std::vector<Impulse::Xray::PingResult> &results);
 	void showImpulseToast(const QString &text);
-
-	void replaceItemWith(
-		std::vector<Item>::iterator which,
-		std::vector<Item>::iterator with);
-	void replaceItemValue(
-		std::vector<Item>::iterator which,
-		const ProxyData &proxy);
+	void replaceImpulseServer(
+		const std::string &id,
+		const std::string &name,
+		std::vector<Impulse::ProxyState::Server> servers);
+	void runImpulseCheck(
+		const Impulse::ProxyState::State &state,
+		std::vector<Impulse::ProxyState::Server> servers);
 
 	const not_null<Main::Account*> _account;
 	Core::SettingsProxy &_settings;

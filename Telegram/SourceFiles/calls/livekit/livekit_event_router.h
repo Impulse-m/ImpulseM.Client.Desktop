@@ -31,6 +31,10 @@ public:
 	// and a key that another route owns is taken over.
 	void addKey(RouteId id, std::uint64_t key);
 
+	// Drops one key of the route, so its events are no longer routed there.
+	// A key that the route does not own is ignored.
+	void removeKey(RouteId id, std::uint64_t key);
+
 	// Drops every key of the route. Its events are dropped until new keys are
 	// added.
 	void clearKeys(RouteId id);

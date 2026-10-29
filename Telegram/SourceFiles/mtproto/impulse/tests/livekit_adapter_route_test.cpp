@@ -25,8 +25,13 @@ namespace {
 constexpr std::uint32_t kFfiRequestDisconnect = 4;
 constexpr std::uint32_t kFfiResponseConnect = 3;
 constexpr std::uint32_t kFfiResponseDisconnect = 4;
+constexpr std::uint32_t kFfiResponseNewPlatformAudio = 76;
+constexpr std::uint32_t kFfiResponseReadyForRoomEvent = 82;
 constexpr std::uint32_t kAsyncIdField = 1;
 constexpr std::uint32_t kDisconnectRoomHandleField = 1;
+constexpr std::uint32_t kOwnedMessageField = 1;
+constexpr std::uint32_t kOwnedHandleField = 1;
+constexpr std::uint32_t kHandleIdField = 1;
 
 // Stands in for the library. It records every request, answers the scripted
 // responses in order, and keeps its own event router as the library does.
@@ -96,6 +101,30 @@ void RunNow(std::function<void()> task) {
 	inner.writeVarintField(kAsyncIdField, asyncId);
 	Impulse::ProtoWriter outer;
 	outer.writeMessageField(responseField, inner);
+	return outer.takeBytes();
+}
+
+// The response of the PlatformAudio request that connect sends after the
+// connect callback, with the given handle.
+[[nodiscard]] std::vector<std::uint8_t> PlatformAudioResponse(
+		std::uint64_t handle) {
+	Impulse::ProtoWriter idMessage;
+	idMessage.writeVarintField(kHandleIdField, handle);
+	Impulse::ProtoWriter owned;
+	owned.writeMessageField(kOwnedHandleField, idMessage);
+	Impulse::ProtoWriter message;
+	message.writeMessageField(kOwnedMessageField, owned);
+	Impulse::ProtoWriter outer;
+	outer.writeMessageField(kFfiResponseNewPlatformAudio, message);
+	return outer.takeBytes();
+}
+
+// The response of the ReadyForRoomEvent request that connect sends after the
+// PlatformAudio request. Its content is not read.
+[[nodiscard]] std::vector<std::uint8_t> ReadyResponse() {
+	const Impulse::ProtoWriter empty;
+	Impulse::ProtoWriter outer;
+	outer.writeMessageField(kFfiResponseReadyForRoomEvent, empty);
 	return outer.takeBytes();
 }
 
@@ -196,9 +225,15 @@ IMPULSE_TEST(LiveKitEventRouterRoutesHandleKeys) {
 
 IMPULSE_TEST(LiveKitTwoAdaptersReceiveOnlyTheirOwnEvents) {
 	const std::shared_ptr<FakeFfi> fake = std::make_shared<FakeFfi>();
+	// Requests in order: connect A, connect B, then after each connect callback
+	// PlatformAudio and ReadyForRoomEvent, and finally the disconnect of A.
 	fake->responses = {
 		AsyncResponse(kFfiResponseConnect, 101),
 		AsyncResponse(kFfiResponseConnect, 202),
+		PlatformAudioResponse(31),
+		ReadyResponse(),
+		PlatformAudioResponse(32),
+		ReadyResponse(),
 		AsyncResponse(kFfiResponseDisconnect, 303),
 	};
 	RecordingDelegate delegateA;
@@ -220,9 +255,9 @@ IMPULSE_TEST(LiveKitTwoAdaptersReceiveOnlyTheirOwnEvents) {
 	// Room A is the first room that was connected, so its disconnect request
 	// carries its own handle and only its own event answers it.
 	adapterA.disconnect();
-	IMPULSE_CHECK(fake->sent.size() == 3);
-	if (fake->sent.size() == 3) {
-		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[2]) == 11);
+	IMPULSE_CHECK(fake->sent.size() == 7);
+	if (fake->sent.size() == 7) {
+		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[6]) == 11);
 	}
 	fake->router.dispatch(DisconnectEvent(303));
 	IMPULSE_CHECK(delegateA.disconnected == 1);
@@ -267,6 +302,8 @@ IMPULSE_TEST(LiveKitDestroyedWhileConnectedDisconnectsRoom) {
 	const std::shared_ptr<FakeFfi> fake = std::make_shared<FakeFfi>();
 	fake->responses = {
 		AsyncResponse(kFfiResponseConnect, 101),
+		PlatformAudioResponse(31),
+		ReadyResponse(),
 		AsyncResponse(kFfiResponseDisconnect, 303),
 	};
 	RecordingDelegate delegate;
@@ -277,11 +314,12 @@ IMPULSE_TEST(LiveKitDestroyedWhileConnectedDisconnectsRoom) {
 	IMPULSE_CHECK(delegate.connected == 1);
 
 	adapter.reset();
-	IMPULSE_CHECK(fake->sent.size() == 2);
-	if (fake->sent.size() == 2) {
-		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[1]) == 11);
+	IMPULSE_CHECK(fake->sent.size() == 4);
+	if (fake->sent.size() == 4) {
+		IMPULSE_CHECK(DisconnectRoomHandle(fake->sent[3]) == 11);
 	}
 	fake->router.dispatch(DisconnectEvent(303));
 	IMPULSE_CHECK(delegate.disconnected == 0);
-	IMPULSE_CHECK(fake->dropped.size() == 2);
+	// The platform audio, the local participant and the room handles.
+	IMPULSE_CHECK(fake->dropped.size() == 3);
 }

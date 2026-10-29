@@ -1,5 +1,6 @@
 #include "calls/livekit/livekit_event_router.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace Impulse {
@@ -27,6 +28,24 @@ void LiveKitEventRouter::addKey(RouteId id, std::uint64_t key) {
 	keysByRoute[id].push_back(key);
 }
 
+void LiveKitEventRouter::removeKey(RouteId id, std::uint64_t key) {
+	std::lock_guard<std::mutex> lock(mutex);
+	const std::map<std::uint64_t, RouteId>::iterator owner = owners.find(key);
+	if (owner == owners.end() || owner->second != id) {
+		return;
+	}
+	owners.erase(owner);
+	const std::map<RouteId, std::vector<std::uint64_t>>::iterator found =
+		keysByRoute.find(id);
+	if (found == keysByRoute.end()) {
+		return;
+	}
+	std::vector<std::uint64_t> &keys = found->second;
+	keys.erase(
+		std::remove(keys.begin(), keys.end(), key),
+		keys.end());
+}
+
 void LiveKitEventRouter::clearKeys(RouteId id) {
 	std::lock_guard<std::mutex> lock(mutex);
 	dropKeys(id);
@@ -44,6 +63,7 @@ void LiveKitEventRouter::dispatch(const LiveKitEvent &event) {
 		event.roomHandle.value_or(0),
 		event.localParticipantHandle.value_or(0),
 		event.publicationHandle.value_or(0),
+		event.streamHandle.value_or(0),
 	};
 	Route route;
 	{

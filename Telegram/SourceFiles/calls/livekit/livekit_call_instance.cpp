@@ -2,7 +2,9 @@
 
 #include "calls/livekit/livekit_ffi_loader.h"
 
+#include <array>
 #include <utility>
+#include <vector>
 
 namespace Impulse {
 namespace {
@@ -14,19 +16,42 @@ constexpr int kConnectedSignalBars = 4;
 
 LiveKitInstance::LiveKitInstance(
 		tgcalls::Descriptor &&descriptor,
+		LiveKit::JoinParameters join,
 		const std::wstring &dllPath,
 		LiveKitAdapter::Poster post)
 : stateUpdated(std::move(descriptor.stateUpdated))
 , signalBarsUpdated(std::move(descriptor.signalBarsUpdated))
+, poster(post)
+, joinParameters(std::move(join))
 , adapter(std::make_unique<LiveKitAdapter>(
 	LiveKitFfiLoader::Process(dllPath),
 	static_cast<LiveKitAdapterDelegate &>(*this),
 	std::move(post))) {
+	// The raw 256-byte call key is the E2EE key material of a 1:1 call, the
+	// same bytes Android passes to its key provider. It is set before the
+	// room connects, so the first published frame is already encrypted.
+	if (descriptor.encryptionKey.value) {
+		const std::array<std::uint8_t, tgcalls::EncryptionKey::kSize> &key
+			= *descriptor.encryptionKey.value;
+		adapter->setSharedKey(std::vector<std::uint8_t>(key.begin(), key.end()));
+		hasSharedKey = true;
+	}
+
+	// The connect is deferred to the owner thread, so the call controller
+	// finishes its setup before the first state can be reported. The guard
+	// keeps a task that runs after the instance is gone from touching it.
+	const std::shared_ptr<bool> guard = alive;
+	poster([this, guard]() {
+		if (*guard) {
+			connectRoom();
+		}
+	});
 }
 
 LiveKitInstance::~LiveKitInstance() {
 	// The adapter is destroyed after this body and releases its handles
 	// without calling back, so no state is reported from here on.
+	*alive = false;
 	stopped = true;
 }
 
@@ -140,8 +165,29 @@ void LiveKitInstance::stop(std::function<void(tgcalls::FinalState)> completion) 
 	}
 }
 
+void LiveKitInstance::connectRoom() {
+	if (stopped) {
+		return;
+	}
+	if (!hasSharedKey) {
+		// A call without its media key must not connect unencrypted.
+		fail("LiveKit call media key is missing");
+		return;
+	}
+	// The result arrives through liveKitConnected or liveKitFailed.
+	adapter->connect(joinParameters.url, joinParameters.token);
+}
+
 void LiveKitInstance::liveKitConnected() {
 	if (stopped) {
+		return;
+	}
+	// The microphone is published with the mute state of the call. A call that
+	// starts muted publishes a muted track, so no live audio is sent. A failed
+	// mute or publish has already reported the failure through liveKitFailed,
+	// and then the state is not set to established.
+	adapter->setMicrophoneMuted(muteMicrophone);
+	if (!adapter->publishMicrophone()) {
 		return;
 	}
 	if (stateUpdated) {

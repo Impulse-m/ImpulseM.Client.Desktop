@@ -1,15 +1,17 @@
 // LiveKit call instance for 1:1 calls. It implements the tgcalls::Instance
 // interface on top of LiveKitAdapter, so the call controller drives LiveKit
-// through the same calls it uses for tgcalls. This class is the shell: every
-// pure virtual is implemented, the signalling methods are no-ops, and failure
-// states end the call. The join parameters and the E2EE wiring are added by
-// the next step.
+// through the same calls it uses for tgcalls. The room is joined from the
+// validated join parameters, with the call media key set as the E2EE shared
+// key before the connect. The microphone is published with the mute state of
+// the call. Connected and failed room states map to the tgcalls states, and a
+// failed state ends the call. The stop completion fires on every path.
 //
 // All public methods run on the owner thread. Adapter events are handed to the
 // owner thread through the poster.
 #pragma once
 
 #include "calls/livekit/livekit_adapter.h"
+#include "mtproto/impulse/core/livekit_contract.h"
 
 #include <tgcalls/Instance.h>
 
@@ -27,18 +29,23 @@ class LiveKitInstance final
 private:
 	std::function<void(tgcalls::State)> stateUpdated;
 	std::function<void(int)> signalBarsUpdated;
+	LiveKitAdapter::Poster poster;
+	LiveKit::JoinParameters joinParameters;
 	std::unique_ptr<LiveKitAdapter> adapter;
 	std::weak_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> incomingVideoOutput;
 	std::shared_ptr<tgcalls::VideoCaptureInterface> videoCapture;
 	tgcalls::TrafficStats trafficStats;
 	tgcalls::NetworkType networkType = tgcalls::NetworkType::Unknown;
 	std::string lastError;
-	bool muteMicrophone = false;
+	std::shared_ptr<bool> alive = std::make_shared<bool>(true);
+	bool hasSharedKey = false;
+	bool muteMicrophone = true;
 	bool stopped = false;
 
 public:
 	LiveKitInstance(
 		tgcalls::Descriptor &&descriptor,
+		LiveKit::JoinParameters join,
 		const std::wstring &dllPath,
 		LiveKitAdapter::Poster post);
 	LiveKitInstance(const LiveKitInstance &other) = delete;
@@ -125,6 +132,9 @@ private:
 
 
 	void liveKitDisconnected() override;
+
+
+	void connectRoom();
 
 
 	void fail(const std::string &message);

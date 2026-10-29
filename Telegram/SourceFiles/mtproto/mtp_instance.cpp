@@ -821,9 +821,12 @@ void Instance::Private::logout(Fn<void()> done) {
 		done();
 		return true;
 	});
-	logoutGuestDcs();
+	// Transport-layer decision: DCs and auth keys are replaced by fleets
+	// and connection identity, so guest DCs are not logged out here
+	// (logoutGuestDcs() is not called).
 }
 
+// Not called: see logout().
 void Instance::Private::logoutGuestDcs() {
 	Expects(!isKeysDestroyer());
 
@@ -1760,29 +1763,14 @@ bool Instance::Private::onErrorDefault(
 		return true;
 	} else if ((code == 401 && type != u"AUTH_KEY_PERM_EMPTY"_q)
 		|| (badGuestDc && _badGuestDcRequests.find(requestId) == _badGuestDcRequests.cend())) {
-		auto dcWithShift = ShiftedDcId(0);
-		if (const auto shiftedDcId = queryRequestByDc(requestId)) {
-			dcWithShift = *shiftedDcId;
-		} else {
-			LOG(("MTP Error: unauthorized request without dc info, requestId %1").arg(requestId));
+		// Transport-layer decision: DCs and auth keys are replaced by
+		// fleets and connection identity, so every DC is treated as main.
+		// auth.exportAuthorization is never sent; an unauthorized request
+		// fails here like a failure in the main DC.
+		if (!badGuestDc && _globalFailHandler) {
+			_globalFailHandler(error, response);
 		}
-		auto newdc = BareDcId(std::abs(dcWithShift));
-		if (!newdc || !hasMainDcId() || newdc == mainDcId()) {
-			if (!badGuestDc && _globalFailHandler) {
-				_globalFailHandler(error, response); // auth failed in main dc
-			}
-			return false;
-		}
-
-		DEBUG_LOG(("MTP Info: importing auth to dcWithShift %1"
-			).arg(dcWithShift));
-		auto &waiters(_authWaiters[newdc]);
-		if (!waiters.size()) {
-			sendAuthExport(newdc);
-		}
-		waiters.push_back(requestId);
-		if (badGuestDc) _badGuestDcRequests.insert(requestId);
-		return true;
+		return false;
 	} else if (type == u"CONNECTION_NOT_INITED"_q
 		|| type == u"CONNECTION_LAYER_INVALID"_q) {
 		SerializedRequest request;

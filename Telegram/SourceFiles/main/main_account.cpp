@@ -33,6 +33,10 @@ namespace {
 
 constexpr auto kWideIdsTag = ~uint64(0);
 
+// Transport-layer decision: stale auth keys are not handed to a
+// KeysDestroyer instance. Kept in the code, switched off.
+constexpr auto kKeysDestroyerEnabled = false;
+
 [[nodiscard]] QString ComposeDataString(const QString &dataName, int index) {
 	auto result = dataName;
 	result.replace('#', QString());
@@ -565,6 +569,13 @@ void Account::loggedOut() {
 void Account::destroyMtpKeys(MTP::AuthKeysList &&keys) {
 	Expects(_mtp != nullptr);
 
+	// Transport-layer decision: DCs and auth keys are replaced by fleets
+	// and connection identity, so no KeysDestroyer instance is created and
+	// the stale keys are dropped without a request to any DC.
+	if (!kKeysDestroyerEnabled) {
+		keys.clear();
+		return;
+	}
 	if (keys.empty()) {
 		return;
 	}

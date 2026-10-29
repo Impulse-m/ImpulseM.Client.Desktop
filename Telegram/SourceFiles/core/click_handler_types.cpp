@@ -133,6 +133,9 @@ constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 		u"graph.org"_q,
 		u"telesco.pe"_q,
 		u"fragment.com"_q,
+		u"impulsem.net"_q,
+		u"o.impulsem.net"_q,
+		u"p.impulsem.net"_q,
 	};
 }
 
@@ -185,7 +188,7 @@ constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 	using namespace qthelp;
 
 	return regex_match(
-		"(^|\\.)(telegram\\.(me|dog)|t\\.me)$",
+		"(^|\\.)(telegram\\.(me|dog)|t\\.me|o\\.impulsem\\.net)$",
 		url.host(),
 		RegExOption::CaseInsensitive).valid();
 }

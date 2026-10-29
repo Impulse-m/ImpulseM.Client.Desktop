@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_url.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_keys.h"
+#include "mtproto/impulse/core/impulse_links.h"
+#include "mtproto/mtproto_config.h"
 #include "core/update_checker.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
@@ -2058,6 +2060,16 @@ const std::vector<LocalUrlHandler> &InternalUrlHandlers() {
 	return Result;
 }
 
+[[nodiscard]] QString ConfiguredLinksHost() {
+	const auto &domain = Core::App().domain();
+	if (!domain.started()) {
+		return QString();
+	}
+	const auto &prefix = domain.active().mtp().configValues().internalLinksDomain;
+	return QString::fromStdString(
+		Impulse::Links::PrefixHost(prefix.toStdString()));
+}
+
 QString TryConvertUrlToLocal(QString url) {
 	if (url.size() > 8192) {
 		url = url.mid(0, 8192);
@@ -2078,7 +2090,13 @@ QString TryConvertUrlToLocal(QString url) {
 		const auto protocol = tonsiteMatch->captured(1);
 		return u"tonsite://"_q + url.mid(protocol.size());
 	}
-	auto subdomainMatch = regex_match(u"^(https?://)?([a-zA-Z0-9\\_]+)\\.t\\.me(/\\d+)?/?(\\?.+)?"_q, url, matchOptions);
+	const auto configHost = ConfiguredLinksHost();
+	auto subdomainPattern = u"^(https?://)?([a-zA-Z0-9\\_]+)\\.(?:t\\.me"_q;
+	if (!configHost.isEmpty()) {
+		subdomainPattern += '|' + QRegularExpression::escape(configHost);
+	}
+	subdomainPattern += u")(/\\d+)?/?(\\?.+)?"_q;
+	auto subdomainMatch = regex_match(subdomainPattern, url, matchOptions);
 	if (subdomainMatch) {
 		const auto name = subdomainMatch->captured(2);
 		if (name.size() > 1 && name != "www") {
@@ -2094,9 +2112,12 @@ QString TryConvertUrlToLocal(QString url) {
 				: url;
 		}
 	}
-	auto telegramMeMatch = regex_match(u"^(https?://)?(www\\.)?(telegram\\.(me|dog)|t\\.me)/(.+)$"_q, url, matchOptions);
-	if (telegramMeMatch) {
-		const auto query = telegramMeMatch->capturedView(5);
+	const auto shortLinkPath = Impulse::Links::ShortLinkPath(
+		url.toStdString(),
+		configHost.toStdString());
+	if (shortLinkPath) {
+		const auto shortLinkQuery = QString::fromStdString(*shortLinkPath);
+		const auto query = QStringView(shortLinkQuery);
 		if (const auto contactMatch = regex_match(
 				u"^contact/([^?#]*)(?:\\?([^#]*))?(?:#.*)?$"_q,
 				query,

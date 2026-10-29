@@ -89,6 +89,10 @@ namespace Wallet {
 class Session;
 } // namespace Wallet
 
+namespace Impulse {
+class LanesSessionSource;
+} // namespace Impulse
+
 namespace Main {
 
 class Account;
@@ -332,6 +336,10 @@ private:
 	// _data depends on _downloader / _uploader.
 	const std::unique_ptr<Data::Session> _data;
 	const not_null<UserData*> _user;
+
+	// Channel lanes of the account transport follow the chat list. Depends
+	// on _data.
+	const std::unique_ptr<Impulse::LanesSessionSource> lanesSource;
 
 	// _emojiStickersPack depends on _data.
 	const std::unique_ptr<Stickers::EmojiPack> _emojiStickersPack;

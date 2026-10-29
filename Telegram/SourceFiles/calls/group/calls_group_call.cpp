@@ -1150,6 +1150,7 @@ void GroupCall::setState(State state) {
 		stopConnectingSound();
 		_delegate->groupCallFailed(this);
 		break;
+	case State::Joined:
 	case State::Connecting:
 		if (!_checkJoinedTimer.isActive()) {
 			_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
@@ -3718,7 +3719,9 @@ void GroupCall::checkLastSpoke() {
 }
 
 void GroupCall::checkJoined() {
-	if (state() != State::Connecting || !_id || !_joinState.ssrc) {
+	if ((state() != State::Connecting && state() != State::Joined)
+		|| !_id
+		|| !_joinState.ssrc) {
 		return;
 	}
 	auto sources = QVector<MTPint>(1, MTP_int(_joinState.ssrc));
@@ -3734,7 +3737,7 @@ void GroupCall::checkJoined() {
 			_joinState.nextActionPending = true;
 			checkNextJoinAction();
 		} else {
-			if (state() == State::Connecting) {
+			if (state() == State::Connecting || state() == State::Joined) {
 				_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
 			}
 			if (_screenJoinState.ssrc
@@ -3748,6 +3751,14 @@ void GroupCall::checkJoined() {
 			}
 		}
 	}).fail([=](const MTP::Error &error) {
+		if (state() != State::Connecting) {
+			// A failed poll of an established call is not an eviction,
+			// keep polling instead of tearing the call down.
+			LOG(("Call Info: Poll error '%1' in checkGroupCall, joined."
+				).arg(error.type()));
+			_checkJoinedTimer.callOnce(kCheckJoinedTimeout);
+			return;
+		}
 		LOG(("Call Info: Full rejoin after error '%1' in checkGroupCall."
 			).arg(error.type()));
 		startRejoin();

@@ -195,3 +195,16 @@ IMPULSE_TEST(ProxyStateLargeIntegerIsExact) {
 	}
 	IMPULSE_CHECK(state.subscriptions[0].updatedAt == 9007199254740993LL);
 }
+
+IMPULSE_TEST(ProxyStateCoreKeyIgnoresPingSettings) {
+	Impulse::ProxyState::Advanced first;
+	auto second = first;
+	second.pingMode = "sequential";
+	second.pingPauseMillis = 250;
+	second.pingTimeoutSeconds = 9;
+	second.pingUrl = "https://example.test/generate_204";
+	second.pingSkipWhileConnected = false;
+	IMPULSE_CHECK(Impulse::ProxyState::CoreKey(first) == Impulse::ProxyState::CoreKey(second));
+	second.muxEnabled = true;
+	IMPULSE_CHECK(Impulse::ProxyState::CoreKey(first) != Impulse::ProxyState::CoreKey(second));
+}

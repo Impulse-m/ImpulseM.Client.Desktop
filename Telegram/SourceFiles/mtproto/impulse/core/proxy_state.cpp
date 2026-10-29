@@ -496,6 +496,17 @@ void RepairToggles(
 
 } // namespace
 
+std::string CoreKey(const Advanced &advanced) {
+	auto core = advanced;
+	const auto defaults = Advanced();
+	core.pingMode = defaults.pingMode;
+	core.pingPauseMillis = defaults.pingPauseMillis;
+	core.pingTimeoutSeconds = defaults.pingTimeoutSeconds;
+	core.pingUrl = defaults.pingUrl;
+	core.pingSkipWhileConnected = defaults.pingSkipWhileConnected;
+	return EncodeAdvanced(core);
+}
+
 std::string Encode(const State &state) {
 	auto useForTransport = state.useForTransport;
 	auto useForCalls = state.useForCalls;

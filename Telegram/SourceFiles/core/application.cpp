@@ -182,6 +182,8 @@ struct ImpulseXrayHost {
 [[nodiscard]] std::string ImpulseCoreKey(
 		const Impulse::ProxyState::State &state) {
 	std::string key = state.enabled ? "on" : "off";
+	key += '|';
+	key += Impulse::ProxyState::CoreKey(state.advanced);
 	if (!state.selectedId) {
 		return key;
 	}
@@ -2124,6 +2126,14 @@ void Application::refreshGlobalProxy() {
 		_private->xray,
 		proxySettings.impulseProxyState());
 	Sandbox::Instance().refreshGlobalProxy();
+}
+
+bool Application::impulseXrayRunning() {
+	const auto &host = _private->xray;
+	std::lock_guard<std::mutex> lock(host->mutex);
+	return !host->stale
+		&& host->runtime
+		&& (host->runtime->status() == Impulse::Xray::Status::Running);
 }
 
 std::optional<Impulse::ProxyRouting::HttpEndpoint>

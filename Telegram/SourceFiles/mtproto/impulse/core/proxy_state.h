@@ -92,6 +92,10 @@ struct State {
 	bool operator==(const State &other) const = default;
 };
 
+// The advanced settings that restart the Xray core, serialized. The ping
+// settings are left out, so a change of them keeps the key equal.
+[[nodiscard]] std::string CoreKey(const Advanced &advanced);
+
 // Writes one JSON object that starts with "v":1. When both toggles are off the
 // written state has useForTransport on, because at least one toggle must be on.
 [[nodiscard]] std::string Encode(const State &state);

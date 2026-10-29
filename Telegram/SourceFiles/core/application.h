@@ -19,6 +19,10 @@ namespace base {
 class BatterySaving;
 } // namespace base
 
+namespace Impulse {
+class ImpulseProxyService;
+} // namespace Impulse
+
 namespace Platform {
 class Integration;
 } // namespace Platform
@@ -346,6 +350,7 @@ public:
 	[[nodiscard]] std::optional<Impulse::ProxyRouting::HttpEndpoint>
 		impulseHttpEndpoint();
 	[[nodiscard]] bool impulseXrayRunning();
+	[[nodiscard]] Impulse::ImpulseProxyService &impulseProxy();
 	void refreshApplicationIcon();
 
 	void quitPreventFinished();

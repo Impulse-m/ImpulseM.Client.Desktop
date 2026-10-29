@@ -29,8 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/local_url_handlers.h"
 #include "core/launcher.h"
 #include "core/proxy_rotation_manager.h"
-#include "core/impulse_proxy/xray_libxray.h"
-#include "core/impulse_proxy/xray_runtime.h"
+#include "core/impulse_proxy/proxy_service.h"
 #include "core/ui_integration.h"
 #include "mtproto/impulse/core/proxy_routing.h"
 #include "core/version.h"
@@ -158,129 +157,6 @@ base::options::toggle OptionSkipUrlSchemeRegister({
 	.description = "Don't re-register tg:// URL scheme on autoupdate.",
 });
 
-// The ImpulseM Xray core, shared between the main thread and the restart
-// worker. The worker keeps its own references, so a restart still running
-// while the application is destroyed touches no freed memory.
-struct ImpulseXrayHost {
-	std::mutex mutex;
-	std::shared_ptr<Impulse::XrayLibrary> library;
-	std::shared_ptr<Impulse::Xray::Runtime> runtime;
-
-	// Core settings of the last requested state. Toggles and ping settings
-	// are not part of it, so changing them does not restart the core.
-	std::optional<std::string> requestedKey;
-	std::optional<Impulse::ProxyState::State> requested;
-
-	// Guarded by the mutex. True while a restart worker is queued or running.
-	bool busy = false;
-
-	// The core does not yet run the requested state, so traffic that the
-	// state routes through the core is blocked until the restart ends.
-	bool stale = false;
-};
-
-[[nodiscard]] std::string ImpulseCoreKey(
-		const Impulse::ProxyState::State &state) {
-	std::string key = state.enabled ? "on" : "off";
-	key += '|';
-	key += Impulse::ProxyState::CoreKey(state.advanced);
-	if (!state.selectedId) {
-		return key;
-	}
-	const std::string &selected = *state.selectedId;
-	key += '|';
-	key += selected;
-	for (const Impulse::ProxyState::Server &server : state.manual) {
-		if (server.id == selected) {
-			key += '|';
-			key += server.outbound;
-		}
-	}
-	for (const Impulse::ProxyState::Subscription &subscription
-			: state.subscriptions) {
-		for (const Impulse::ProxyState::Server &server
-				: subscription.servers) {
-			if (server.id == selected) {
-				key += '|';
-				key += server.outbound;
-			}
-		}
-	}
-	return key;
-}
-
-// Applies the latest requested state until no newer one arrives, then points
-// the sandbox at the routed endpoint. Runs on a worker thread, because a
-// restart blocks until the core is started or failed.
-void RunImpulseXrayRestarts(const std::shared_ptr<ImpulseXrayHost> &host) {
-	while (true) {
-		std::shared_ptr<Impulse::Xray::Runtime> runtime;
-		std::optional<Impulse::ProxyState::State> next;
-		{
-			std::lock_guard<std::mutex> lock(host->mutex);
-			next = std::move(host->requested);
-			host->requested.reset();
-			if (!next) {
-				host->busy = false;
-				host->stale = false;
-				break;
-			}
-			runtime = host->runtime;
-		}
-		if (runtime) {
-			runtime->restart(*next);
-		}
-	}
-	crl::on_main([] {
-		if (IsAppLaunched()) {
-			Sandbox::Instance().refreshGlobalProxy();
-		}
-	});
-}
-
-// Main thread. Starts or stops the core for the state when its core settings
-// changed. The core is started only when the proxy is enabled, and the
-// loader is created on first use.
-void RequestImpulseXrayRestart(
-		const std::shared_ptr<ImpulseXrayHost> &host,
-		const Impulse::ProxyState::State &state) {
-	std::lock_guard<std::mutex> lock(host->mutex);
-	if (!host->runtime) {
-		if (!state.enabled) {
-			return;
-		}
-#ifdef _WIN32
-		const std::wstring path = QDir::toNativeSeparators(
-			QCoreApplication::applicationDirPath()
-			+ "/modules/x64/xray/libXray.dll").toStdWString();
-		host->library = std::make_shared<Impulse::XrayLibrary>(path);
-		const std::shared_ptr<Impulse::XrayLibrary> library = host->library;
-		host->runtime = std::make_shared<Impulse::Xray::Runtime>(
-			[library](
-					const std::string &method,
-					const std::string &payloadJson) {
-				return library->invoke(method, payloadJson).get();
-			});
-#else // _WIN32
-		return;
-#endif // _WIN32
-	}
-	const std::string key = ImpulseCoreKey(state);
-	if (host->requestedKey == key) {
-		return;
-	}
-	host->requestedKey = key;
-	host->requested = state;
-	host->stale = true;
-	if (host->busy) {
-		return;
-	}
-	host->busy = true;
-	crl::async([=] {
-		RunImpulseXrayRestarts(host);
-	});
-}
-
 } // namespace
 
 Application *Application::Instance = nullptr;
@@ -292,8 +168,12 @@ struct Application::Private {
 	UiIntegration uiIntegration;
 	Settings settings;
 	std::unique_ptr<ProxyRotationManager> proxyRotation;
-	std::shared_ptr<ImpulseXrayHost> xray
-		= std::make_shared<ImpulseXrayHost>();
+	std::unique_ptr<Impulse::ImpulseProxyService> impulseProxy
+		= std::make_unique<Impulse::ImpulseProxyService>([] {
+			if (IsAppLaunched()) {
+				Sandbox::Instance().refreshGlobalProxy();
+			}
+		});
 };
 
 Application::Application()
@@ -2122,38 +2002,23 @@ void Application::refreshGlobalProxy() {
 	} else {
 		MTP::WebProxy::Transport::Deactivate();
 	}
-	RequestImpulseXrayRestart(
-		_private->xray,
-		proxySettings.impulseProxyState());
+	impulseProxy().apply(proxySettings.impulseProxyState());
 	Sandbox::Instance().refreshGlobalProxy();
 }
 
 bool Application::impulseXrayRunning() {
-	const auto &host = _private->xray;
-	std::lock_guard<std::mutex> lock(host->mutex);
-	return !host->stale
-		&& host->runtime
-		&& (host->runtime->status() == Impulse::Xray::Status::Running);
+	return impulseProxy().running();
+}
+
+Impulse::ImpulseProxyService &Application::impulseProxy() {
+	return *_private->impulseProxy;
 }
 
 std::optional<Impulse::ProxyRouting::HttpEndpoint>
 Application::impulseHttpEndpoint() {
 	const auto &state = settings().proxy().impulseProxyState();
-	const auto &host = _private->xray;
-	std::optional<Impulse::ProxyRouting::Runtime> runtime;
-	{
-		std::lock_guard<std::mutex> lock(host->mutex);
-		if (!host->stale && host->runtime) {
-			const auto endpoints = host->runtime->endpoints();
-			if (endpoints) {
-				runtime = Impulse::ProxyRouting::Runtime{
-					endpoints->httpPort,
-					endpoints->user,
-					endpoints->password,
-				};
-			}
-		}
-	}
+	const std::optional<Impulse::ProxyRouting::Runtime> runtime
+		= impulseProxy().runningRuntime();
 	const auto route = Impulse::ProxyRouting::Decide(
 		state.enabled,
 		state.useForTransport,

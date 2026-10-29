@@ -23,16 +23,17 @@ constexpr const char *kSdkVersion = "1.0";
 using FfiCallbackFunction = void (*)(const std::uint8_t *, std::size_t);
 using DropHandleFunction = bool (*)(std::uint64_t);
 
-// The drop function of the process library. It is set once the library symbols
-// are resolved, before the library can call back into the router.
+// The drop function of the process library. It is set while the library is
+// initialized and cleared before the library is disposed.
 std::atomic<DropHandleFunction> processDropHandle{nullptr};
 
 // Releases a buffer handle that no route took. The library thread calls it.
 void ReleaseUntakenHandle(std::uint64_t handle) {
 	const DropHandleFunction drop = processDropHandle.load();
-	if (drop) {
-		drop(handle);
+	if (!drop || handle == kInvalidHandle) {
+		return;
 	}
+	drop(handle);
 }
 
 LiveKitEventRouter &ProcessEventRouter() {
@@ -121,7 +122,6 @@ LiveKitFfiLoader::LiveKitFfiLoader(const std::wstring &dllPath)
 		impl->clearSymbols();
 		return;
 	}
-	processDropHandle.store(impl->dropHandleCall);
 }
 
 LiveKitFfiLoader::~LiveKitFfiLoader() = default;
@@ -156,6 +156,7 @@ bool LiveKitFfiLoader::initialize(
 		sdk.c_str(),
 		sdkVersion.c_str());
 	impl->initialized = true;
+	processDropHandle.store(impl->dropHandleCall);
 	return true;
 }
 
@@ -198,6 +199,7 @@ void LiveKitFfiLoader::dispose() {
 	if (!loaded() || !impl->initialized) {
 		return;
 	}
+	processDropHandle.store(nullptr);
 	impl->disposeCall();
 	impl->initialized = false;
 }

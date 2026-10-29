@@ -24,6 +24,7 @@
 #include "base/weak_ptr.h"
 #include "calls/livekit/livekit_adapter_interface.h"
 
+#include <api/scoped_refptr.h>
 #include <tgcalls/group/GroupInstanceImpl.h>
 
 #include <cstdint>

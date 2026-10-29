@@ -11,7 +11,9 @@
 #include "calls/livekit/livekit_adapter.h"
 #include "calls/livekit/livekit_ffi_loader.h"
 
+#include <api/media_stream_interface.h>
 #include <crl/crl_on_main.h>
+#include <tgcalls/VideoCaptureInterface.h>
 
 #include <QtCore/QByteArray>
 #include <QtCore/QJsonArray>
@@ -243,7 +245,7 @@ LiveKitGroupInstance::LiveKitGroupInstance(
 , params(config)
 , adapter(std::make_unique<LiveKitAdapter>(
 		LiveKitFfiLoader::Process(config.dllPath),
-		*this,
+		static_cast<LiveKitAdapterDelegate &>(*this),
 		[](std::function<void()> task) {
 			crl::on_main(std::move(task));
 		})) {

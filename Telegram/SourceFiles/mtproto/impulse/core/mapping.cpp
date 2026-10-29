@@ -129,6 +129,9 @@ bool parseField(
 		field.flagsName = *flagsName;
 		field.flagBit = static_cast<std::int32_t>(*bit);
 	}
+	if (const std::string *derived = stringMember(node, "derived_from")) {
+		field.derivedFrom = *derived;
+	}
 	if (const Json::Value *unmapped = node.find("unmapped")) {
 		const std::optional<bool> value = unmapped->asBool();
 		if (!value) {

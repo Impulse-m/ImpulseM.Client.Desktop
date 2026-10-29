@@ -17,6 +17,7 @@ struct MappingField {
 	std::int32_t flagBit = -1;
 	std::string oneofGroup;
 	bool unmapped = false;
+	std::string derivedFrom;
 };
 
 struct MappingConstructor {

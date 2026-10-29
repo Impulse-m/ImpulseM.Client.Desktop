@@ -91,6 +91,55 @@ void Append(std::vector<std::uint8_t> &target, const std::vector<std::uint8_t> &
 	return std::string();
 }
 
+// The local error type of a failed decode, or an empty string on success.
+[[nodiscard]] std::string DecodeObjectErrorType(
+		const Impulse::Transcoder &transcoder,
+		std::string_view tlType,
+		const std::vector<std::uint8_t> &proto) {
+	try {
+		static_cast<void>(transcoder.decodeObject(tlType, proto, {}));
+	} catch (const Impulse::TranscodeError &error) {
+		return std::string(error.type());
+	}
+	return std::string();
+}
+
+[[nodiscard]] std::string DecodeResultErrorType(
+		const Impulse::Transcoder &transcoder,
+		std::uint32_t methodId,
+		const std::vector<std::uint8_t> &proto) {
+	try {
+		static_cast<void>(transcoder.decodeResult(methodId, proto, {}));
+	} catch (const Impulse::TranscodeError &error) {
+		return std::string(error.type());
+	}
+	return std::string();
+}
+
+// The id of the first method whose result is a list of the element kind.
+[[nodiscard]] std::uint32_t FindListMethodId(
+		const Impulse::MappingTable &mapping,
+		std::string_view elementKind) {
+	for (const Impulse::MappingMethod &method : mapping.mapping().methods) {
+		if (method.resultKind == "list" && method.resultElement.kind == elementKind) {
+			return method.id;
+		}
+	}
+	return 0;
+}
+
+// The id of the first method whose result has the given kind (bool, int, long).
+[[nodiscard]] std::uint32_t FindResultKindMethodId(
+		const Impulse::MappingTable &mapping,
+		std::string_view resultKind) {
+	for (const Impulse::MappingMethod &method : mapping.mapping().methods) {
+		if (method.resultKind == resultKind) {
+			return method.id;
+		}
+	}
+	return 0;
+}
+
 } // namespace
 
 IMPULSE_TEST(TranscoderEncodesMessageGolden) {
@@ -233,4 +282,210 @@ IMPULSE_TEST(TlReaderRejectsReadPastEnd) {
 		thrown = error.type() == "CLIENT_TRANSCODE_FAILED";
 	}
 	IMPULSE_CHECK(thrown);
+}
+
+IMPULSE_TEST(TranscoderDecodesMessageGolden) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::vector<std::uint8_t> proto = Hex(
+		"121c 0801 4801 6001 80012a a20104 0a020805 d00180e2cfaa06 da01026869");
+	const std::vector<std::uint8_t> expected = Hex(
+		"d3b90076 02000001 02000000 2a000000 22175159 0500000000000000 00f15365 02686900");
+	IMPULSE_CHECK(transcoder.decodeObject("Message", proto, {}) == expected);
+}
+
+IMPULSE_TEST(TranscoderMessageRoundTripsThroughProto) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::vector<std::uint8_t> tl = Hex(
+		"d3b90076 02000001 02000000 2a000000 22175159 0500000000000000 00f15365 02686900");
+	const std::vector<std::uint8_t> proto = transcoder.encodeObject("Message", tl);
+	IMPULSE_CHECK(transcoder.decodeObject("Message", proto, {}) == tl);
+}
+
+IMPULSE_TEST(TranscoderDecodesPeerUserGolden) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	IMPULSE_CHECK(
+		transcoder.decodeObject("Peer", Hex("0a020805"), {})
+		== Hex("22175159 0500000000000000"));
+}
+
+IMPULSE_TEST(TranscoderSkipsUnknownProtoFields) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// Field 99 (varint 1) sits inside the peerUser body and is not in the mapping.
+	IMPULSE_CHECK(
+		transcoder.decodeObject("Peer", Hex("0a05 0805 980601"), {})
+		== Hex("22175159 0500000000000000"));
+}
+
+IMPULSE_TEST(TranscoderDecodesUsersGetUsersGolden) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::uint32_t methodId = loaded->methodId("users.getUsers").value_or(0);
+	IMPULSE_CHECK(methodId != 0);
+	IMPULSE_CHECK(
+		transcoder.decodeResult(methodId, Hex("0a040a02080b0a040a02080b"), {})
+		== Hex("15c4b51c 02000000 7a4bbcd3 0b00000000000000 7a4bbcd3 0b00000000000000"));
+}
+
+IMPULSE_TEST(TranscoderDecodesAuthorizationAndCapturesTokens) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::vector<std::uint8_t> proto = Hex("0a0c 2a040a020803 320141 3a0142");
+	std::vector<std::string> captured;
+	const Impulse::TranscodeCaptureSink sink = [&captured](
+			std::string_view protoMessage,
+			std::string_view fieldName,
+			std::string_view value) {
+		captured.push_back(
+			std::string(protoMessage) + "|" + std::string(fieldName) + "|" + std::string(value));
+	};
+	IMPULSE_CHECK(
+		transcoder.decodeObject("auth.Authorization", proto, sink)
+		== Hex("d4c0a22e 00000000 7a4bbcd3 0300000000000000"));
+	IMPULSE_CHECK(captured.size() == 2);
+	if (captured.size() == 2) {
+		IMPULSE_CHECK(captured[0] == "AuthAuthorizationValue|session_token|A");
+		IMPULSE_CHECK(captured[1] == "AuthAuthorizationValue|refresh_token|B");
+	}
+}
+
+IMPULSE_TEST(TranscoderRejectsOneofWithoutKnownArm) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// Field 9 is a varint, not an arm of auth.Authorization.
+	IMPULSE_CHECK(
+		DecodeObjectErrorType(transcoder, "auth.Authorization", Hex("48 01"))
+		== "CLIENT_TRANSCODE_FAILED");
+}
+
+IMPULSE_TEST(TranscoderRejectsUnknownTypeWhenDecoding) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	IMPULSE_CHECK(
+		DecodeObjectErrorType(transcoder, "NoSuchType", Hex("08 01"))
+		== "CLIENT_TRANSCODE_FAILED");
+}
+
+IMPULSE_TEST(TranscoderRejectsTruncatedAndMalformedProto) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	// A length-delimited field longer than the data.
+	IMPULSE_CHECK(
+		DecodeObjectErrorType(transcoder, "Peer", Hex("0a 02"))
+		== "CLIENT_TRANSCODE_FAILED");
+	// A field whose varint value runs to 11 bytes.
+	IMPULSE_CHECK(
+		DecodeObjectErrorType(transcoder, "Peer", Hex("08 ff ff ff ff ff ff ff ff ff ff 01"))
+		== "CLIENT_TRANSCODE_FAILED");
+}
+
+IMPULSE_TEST(TranscoderDecodesBoolResults) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::uint32_t methodId = loaded->methodId("account.updateStatus").value_or(0);
+	IMPULSE_CHECK(methodId != 0);
+	IMPULSE_CHECK(transcoder.decodeResult(methodId, Hex("08 01"), {}) == Hex("b5757299"));
+	IMPULSE_CHECK(transcoder.decodeResult(methodId, Hex("08 00"), {}) == Hex("37 97 79 bc"));
+	IMPULSE_CHECK(
+		DecodeResultErrorType(transcoder, methodId, {})
+		== "CLIENT_RESPONSE_PARSE_FAILED");
+}
+
+IMPULSE_TEST(TranscoderRejectsUnmappedResultMethod) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	IMPULSE_CHECK(
+		DecodeResultErrorType(transcoder, 1u, {}) == "CLIENT_METHOD_NOT_MAPPED");
+}
+
+IMPULSE_TEST(TranscoderDecodesIntAndLongResults) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::uint32_t intMethodId = FindResultKindMethodId(*loaded, "int");
+	IMPULSE_CHECK(intMethodId != 0);
+	if (intMethodId != 0) {
+		IMPULSE_CHECK(transcoder.decodeResult(intMethodId, Hex("08 2a"), {}) == Hex("2a000000"));
+		// An absent int result is zero.
+		IMPULSE_CHECK(transcoder.decodeResult(intMethodId, {}, {}) == Hex("00000000"));
+	}
+	const std::uint32_t longMethodId = FindResultKindMethodId(*loaded, "long");
+	IMPULSE_CHECK(longMethodId != 0);
+	if (longMethodId != 0) {
+		IMPULSE_CHECK(
+			transcoder.decodeResult(longMethodId, Hex("08 2a"), {})
+			== Hex("2a00000000000000"));
+	}
+}
+
+IMPULSE_TEST(TranscoderDecodesPackedAndUnpackedIntVectors) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
+	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::uint32_t listMethodId = FindListMethodId(*loaded, "int");
+	IMPULSE_CHECK(listMethodId != 0);
+	if (listMethodId == 0) {
+		return;
+	}
+	const std::vector<std::uint8_t> expected = Hex(
+		"15c4b51c 03000000 01000000 02000000 2c010000");
+	// Packed: one length-delimited field of varints 1, 2 and 300.
+	IMPULSE_CHECK(
+		transcoder.decodeResult(listMethodId, Hex("0a04 01 02 ac 02"), {}) == expected);
+	// Unpacked: one varint field per element.
+	IMPULSE_CHECK(
+		transcoder.decodeResult(listMethodId, Hex("08 01 08 02 08 ac 02"), {}) == expected);
 }

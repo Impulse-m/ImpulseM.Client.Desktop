@@ -5,9 +5,11 @@
 #include <zlib.h>
 
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <system_error>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -248,6 +250,22 @@ bool parseConstructor(
 	return parseCaptureList(node.find("capture"), ctor.captures, error);
 }
 
+bool parseResultElement(
+		const Json::Value &node,
+		MappingField &element,
+		std::string &error) {
+	const std::string *kind = stringMember(node, "kind");
+	if (!kind) {
+		error = "mapping result element has no kind";
+		return false;
+	}
+	element.kind = *kind;
+	if (const std::string *type = stringMember(node, "type")) {
+		element.type = *type;
+	}
+	return true;
+}
+
 bool parseMethod(
 		const Json::Value &node,
 		MappingMethod &method,
@@ -276,7 +294,100 @@ bool parseMethod(
 		return false;
 	}
 	method.result = *resultType;
+	if (const std::string *resultKind = result->asString()) {
+		method.resultKind = *resultKind;
+	} else {
+		const std::string *kind = stringMember(*result, "kind");
+		if (!kind) {
+			error = "mapping method " + method.name + " has no result kind";
+			return false;
+		}
+		method.resultKind = *kind;
+		if (const std::string *type = stringMember(*result, "type")) {
+			method.resultType = *type;
+		}
+		if (const Json::Value *elem = result->find("elem")) {
+			if (!parseResultElement(*elem, method.resultElement, error)) {
+				return false;
+			}
+		}
+	}
 	return parseFieldList(node.find("params"), method.params, error);
+}
+
+bool parseArmKey(
+		const std::string &text,
+		std::uint32_t &arm) {
+	if (text.empty()) {
+		return false;
+	}
+	std::uint32_t value = 0;
+	const char *first = text.data();
+	const char *last = text.data() + text.size();
+	const std::from_chars_result parsed = std::from_chars(first, last, value);
+	if (parsed.ec != std::errc() || parsed.ptr != last) {
+		return false;
+	}
+	arm = value;
+	return true;
+}
+
+// The types list is optional: a mapping without it has no decodable objects.
+bool parseTypes(
+		const Json::Value &root,
+		Mapping &out,
+		std::string &error) {
+	const Json::Value *node = root.find("types");
+	if (!node) {
+		return true;
+	}
+	const std::vector<Json::Value> *items = node->asArray();
+	if (!items) {
+		error = "mapping type list is not an array";
+		return false;
+	}
+	std::unordered_set<std::string> typeNames;
+	out.types.reserve(items->size());
+	for (const Json::Value &item : *items) {
+		const std::string *name = stringMember(item, "name");
+		if (!name) {
+			error = "mapping type without name";
+			return false;
+		}
+		if (!typeNames.insert(*name).second) {
+			error = "duplicate type " + *name;
+			return false;
+		}
+		MappingType type;
+		type.name = *name;
+		if (const Json::Value *polymorphic = item.find("polymorphic")) {
+			const std::optional<bool> flag = polymorphic->asBool();
+			if (!flag) {
+				error = "mapping type " + type.name + " has a bad polymorphic flag";
+				return false;
+			}
+			type.polymorphic = *flag;
+		}
+		if (const Json::Value *arms = item.find("arms")) {
+			const std::vector<Json::Value::Member> *members = arms->asObject();
+			if (!members) {
+				error = "mapping type " + type.name + " has bad arms";
+				return false;
+			}
+			for (const Json::Value::Member &member : *members) {
+				MappingArm arm;
+				const std::optional<std::uint32_t> constructorId = uint32Member(&member.second);
+				if (!parseArmKey(member.first, arm.arm) || !constructorId) {
+					error = "mapping type " + type.name + " has a bad arm";
+					return false;
+				}
+				arm.constructorId = *constructorId;
+				type.arms.push_back(arm);
+			}
+		}
+		out.types.push_back(std::move(type));
+	}
+	return true;
 }
 
 bool parseMapping(
@@ -346,6 +457,10 @@ bool parseMapping(
 			return false;
 		}
 		out.methods.push_back(std::move(method));
+	}
+
+	if (!parseTypes(root, out, error)) {
+		return false;
 	}
 
 	const Json::Value *wrappers = root.find("wrappers");

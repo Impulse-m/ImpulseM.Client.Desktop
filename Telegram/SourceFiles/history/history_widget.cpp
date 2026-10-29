@@ -33,6 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_requests_box.h"
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
+#include "core/impulse_features.h"
 #include "core/mime_type.h"
 #include "history/view/history_view_draw_to_reply.h"
 #include "history/view/controls/history_view_bot_menu_button.h"
@@ -7395,7 +7396,8 @@ bool HistoryWidget::textExceedsMaxSize() const {
 }
 
 void HistoryWidget::updateAiButtonVisibility() {
-	const auto hidden = !hasEnoughLinesForAi()
+	const auto hidden = !ImpulseFeatures::AI_COMPOSE
+		|| !hasEnoughLinesForAi()
 		|| !_send->isVisible()
 		|| !_field->isVisible();
 	if (_aiButton->isHidden() == hidden) {

@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "core/core_cloud_password.h"
 #include "core/core_settings.h"
+#include "core/impulse_features.h"
 #include "core/update_checker.h"
 #include "data/components/passkeys.h"
 #include "data/components/top_peers.h"
@@ -1039,15 +1040,17 @@ void BuildBotsAndWebsitesSection(SectionBuilder &builder) {
 		.keywords = { u"bots"_q, u"payment"_q, u"websites"_q },
 	});
 
-	builder.addButton({
-		.id = u"privacy/bots_payment"_q,
-		.title = tr::lng_settings_clear_payment_info(),
-		.st = &st::settingsButtonNoIcon,
-		.onClick = [=] {
-			controller->show(ClearPaymentInfoBox(session));
-		},
-		.keywords = { u"payment"_q, u"bots"_q, u"clear"_q },
-	});
+	if (ImpulseFeatures::PAYMENT_SHIPPING_INFO) {
+		builder.addButton({
+			.id = u"privacy/bots_payment"_q,
+			.title = tr::lng_settings_clear_payment_info(),
+			.st = &st::settingsButtonNoIcon,
+			.onClick = [=] {
+				controller->show(ClearPaymentInfoBox(session));
+			},
+			.keywords = { u"payment"_q, u"bots"_q, u"clear"_q },
+		});
+	}
 
 	builder.addSkip();
 	builder.addDivider();

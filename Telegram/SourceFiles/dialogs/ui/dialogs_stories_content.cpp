@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "dialogs/ui/dialogs_stories_content.h"
 
 #include "base/unixtime.h"
+#include "core/impulse_features.h"
 #include "data/data_changes.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
@@ -223,6 +224,9 @@ void FillSourceMenu(
 	const auto peer = owner->peer(PeerId(request.id));
 	const auto &add = request.callback;
 	if (peer->isSelf()) {
+		if (!ImpulseFeatures::STORIES_POSTING) {
+			return;
+		}
 		add(tr::lng_stories_archive_button(tr::now), [=] {
 			controller->showSection(Info::Stories::Make(
 				peer,

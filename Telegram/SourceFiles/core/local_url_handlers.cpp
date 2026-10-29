@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_premium.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
+#include "core/impulse_features.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_keys.h"
 #include "mtproto/impulse/core/impulse_links.h"
@@ -416,6 +417,9 @@ bool ApplySocksProxy(
 		Window::SessionController *controller,
 		const Match &match,
 		const QVariant &context) {
+	if (!ImpulseFeatures::PROXY) {
+		return true;
+	}
 	auto params = url_parse_params(
 		match->captured(1),
 		qthelp::UrlParamNameTransform::ToLower);
@@ -433,6 +437,9 @@ bool ApplyMtprotoProxy(
 		Window::SessionController *controller,
 		const Match &match,
 		const QVariant &context) {
+	if (!ImpulseFeatures::PROXY) {
+		return true;
+	}
 	auto params = url_parse_params(
 		match->captured(1),
 		qthelp::UrlParamNameTransform::ToLower);

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/message_field.h"
 #include "chat_helpers/share_message_phrase_factory.h"
+#include "core/impulse_features.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/wrap/slide_wrap.h"
@@ -1332,9 +1333,10 @@ void Filler::addViewStatistics() {
 				}
 			}, &st::menuIconStats);
 		}
-		if (canGetStats
-			|| channel->amCreator()
-			|| channel->canPostStories()) {
+		if (ImpulseFeatures::BOOSTS
+			&& (canGetStats
+				|| channel->amCreator()
+				|| channel->canPostStories())) {
 			_addAction(tr::lng_boosts_title(tr::now), [=] {
 				if ([[maybe_unused]] const auto strong = weak.get()) {
 					controller->showSection(Info::Boosts::Make(peer));
@@ -1470,6 +1472,9 @@ void Filler::addCreateTodoList() {
 }
 
 void Filler::addThemeEdit() {
+	if (!ImpulseFeatures::CHAT_WALLPAPER_AND_THEME) {
+		return;
+	}
 	if (_peer->isVerifyCodes() || _peer->isRepliesChat()) {
 		return;
 	}

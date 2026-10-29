@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/deep_links/deep_links_settings.h"
+#include "core/impulse_features.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "settings/settings_builder.h"
@@ -664,6 +665,9 @@ void Search::rebuildRecentResults() {
 }
 
 void Search::rebuildFaqResults() {
+	if (!ImpulseFeatures::HELP_SECTION) {
+		return;
+	}
 	if (_faqStartIndex >= int(_entries.size())) {
 		return;
 	}

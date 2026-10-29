@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/impulse_features.h"
 #include "core/local_url_handlers.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
@@ -97,7 +98,7 @@ struct TopButtonMenuState {
 [[nodiscard]] std::vector<QString> ExtractLinkCandidates(const QString &input) {
 	auto urls = std::vector<QString>();
 	static const auto urlRegex = QRegularExpression(
-		R"((?:https?:\/\/[^\s]+|tg:\/\/[^\s]+|(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/[^\s]+))",
+		R"((?:https?:\/\/[^\s]+|tg:\/\/[^\s]+|vless:\/\/[^\s]+|(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)\/[^\s]+))",
 		QRegularExpression::CaseInsensitiveOption);
 
 	auto it = urlRegex.globalMatch(input);
@@ -1374,8 +1375,8 @@ void ProxiesBox::refreshProxyRotation() {
 	if (!_proxyRotation || !_proxyRotationOptions) {
 		return;
 	}
-	const auto visible = (_proxySettings->current()
-			== ProxyData::Settings::Enabled)
+	const auto visible = ImpulseFeatures::PROXY
+		&& (_proxySettings->current() == ProxyData::Settings::Enabled)
 		&& _settings.selected()
 		&& (_settings.list().size() > 1);
 	_proxyRotation->toggle(visible, anim::type::normal);
@@ -1638,6 +1639,10 @@ void ProxyBox::setupTypes() {
 		{ Type::Web, u"WEB"_q },
 	};
 	for (const auto &[type, label] : types) {
+		if (!ImpulseFeatures::PROXY
+			&& (type == Type::Mtproto || type == Type::Socks5)) {
+			continue;
+		}
 		_content->add(
 			object_ptr<Ui::Radioenum<Type>>(
 				_content,

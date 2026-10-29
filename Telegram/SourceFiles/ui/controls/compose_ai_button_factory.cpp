@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/options.h"
 #include "boxes/compose_ai_box.h"
+#include "core/impulse_features.h"
 #include "core/mime_type.h"
 #include "data/data_ai_compose_tones.h"
 #include "data/data_premium_limits.h"
@@ -190,7 +191,8 @@ auto SetupCaptionAiButton(SetupCaptionAiButtonArgs &&args)
 	}));
 
 	const auto updateVisibility = [=] {
-		const auto visible = !field->isHidden()
+		const auto visible = ImpulseFeatures::AI_COMPOSE
+			&& !field->isHidden()
 			&& HasEnoughLinesForAi(session, field);
 		button->setVisible(visible);
 		if (visible) {

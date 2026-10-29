@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/username_box.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
+#include "core/impulse_features.h"
 #include "data/data_user.h"
 #include "data/notify/data_notify_settings.h"
 #include "info/info_memento.h"
@@ -122,6 +123,9 @@ Result ShowSavedMessages(const Context &ctx) {
 }
 
 Result ShowFaq(const Context &ctx) {
+	if (!ImpulseFeatures::HELP_SECTION) {
+		return Result::Handled;
+	}
 	::Settings::OpenFaq(
 		ctx.controller ? base::make_weak(ctx.controller) : nullptr);
 	return Result::Handled;
@@ -1716,6 +1720,9 @@ void RegisterSettingsHandlers(Router &router) {
 	router.add(u"settings"_q, {
 		.path = u"ask-question"_q,
 		.action = CodeBlock{ [](const Context &ctx) {
+			if (!ImpulseFeatures::HELP_SECTION) {
+				return Result::Handled;
+			}
 			if (!ctx.controller) {
 				return Result::NeedsAuth;
 			}
@@ -1727,6 +1734,9 @@ void RegisterSettingsHandlers(Router &router) {
 	router.add(u"settings"_q, {
 		.path = u"features"_q,
 		.action = CodeBlock{ [](const Context &ctx) {
+			if (!ImpulseFeatures::HELP_SECTION) {
+				return Result::Handled;
+			}
 			UrlClickHandler::Open(tr::lng_telegram_features_url(tr::now));
 			return Result::Handled;
 		}},

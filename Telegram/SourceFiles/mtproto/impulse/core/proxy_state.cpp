@@ -217,6 +217,36 @@ void RepairToggles(
 	return flag ? *flag : fallback;
 }
 
+// Android reads enabled and useForCalls with Gson getAsBoolean: a JSON
+// boolean is taken as is, a JSON string reads true only when it spells
+// "true" in any letter case, and any other or missing value reads false.
+[[nodiscard]] bool ReadFlagOrFalse(
+		const Json::Value &object,
+		std::string_view key) {
+	const Json::Value *value = object.find(key);
+	if (value == nullptr) {
+		return false;
+	}
+	if (const std::optional<bool> flag = value->asBool()) {
+		return *flag;
+	}
+	const std::string *text = value->asString();
+	if (text == nullptr || text->size() != 4) {
+		return false;
+	}
+	constexpr std::string_view truth = std::string_view("true");
+	for (std::size_t i = 0; i < 4; ++i) {
+		char symbol = (*text)[i];
+		if (symbol >= 'A' && symbol <= 'Z') {
+			symbol = static_cast<char>(symbol - 'A' + 'a');
+		}
+		if (symbol != truth[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
 [[nodiscard]] std::int64_t ReadInt64(
 		const Json::Value &object,
 		std::string_view key,
@@ -533,11 +563,12 @@ State Decode(std::string_view text) {
 	const Json::Value &root = *parsed.value;
 
 	State state = State();
-	state.enabled = ReadBool(root, "enabled", state.enabled);
+	state.enabled = ReadFlagOrFalse(root, "enabled");
 	state.useForTransport = ReadBool(root, "useForTransport", state.useForTransport);
-	// A stored useForCalls that is missing or not a boolean reads as false,
-	// as Android's codec does. The default of a new State is still true.
-	state.useForCalls = ReadBool(root, "useForCalls", false);
+	// A stored useForCalls that is missing reads as false, as Android's codec
+	// does, and a string spelling "true" reads as true. The default of a new
+	// State is still true.
+	state.useForCalls = ReadFlagOrFalse(root, "useForCalls");
 	RepairToggles(state.useForTransport, state.useForCalls);
 	state.selectedId = ReadOptionalString(root, "selectedId");
 	state.manual = DecodeServers(ReadArray(root, "manual"));

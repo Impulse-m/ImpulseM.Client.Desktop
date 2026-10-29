@@ -177,6 +177,42 @@ IMPULSE_TEST(ProxyStateMistypedFieldKeepsDefault) {
 	IMPULSE_CHECK(!state.useForCalls);
 }
 
+IMPULSE_TEST(ProxyStateStringTrueReadsAsTrueForEnabledAndUseForCalls) {
+	const Impulse::ProxyState::State lower = Impulse::ProxyState::Decode(R"({"enabled":"true","useForCalls":"true"})");
+	IMPULSE_CHECK(lower.enabled);
+	IMPULSE_CHECK(lower.useForCalls);
+
+	const Impulse::ProxyState::State mixed = Impulse::ProxyState::Decode(R"({"enabled":"TrUe","useForCalls":"TRUE"})");
+	IMPULSE_CHECK(mixed.enabled);
+	IMPULSE_CHECK(mixed.useForCalls);
+}
+
+IMPULSE_TEST(ProxyStateOtherStringsReadAsFalseForEnabledAndUseForCalls) {
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
+		R"({"enabled":"false","useForCalls":"false","useForTransport":true})");
+	IMPULSE_CHECK(!state.enabled);
+	IMPULSE_CHECK(!state.useForCalls);
+	IMPULSE_CHECK(state.useForTransport);
+
+	const Impulse::ProxyState::State other = Impulse::ProxyState::Decode(R"({"enabled":"tru","useForCalls":"truee"})");
+	IMPULSE_CHECK(!other.enabled);
+	IMPULSE_CHECK(!other.useForCalls);
+}
+
+IMPULSE_TEST(ProxyStateNumericFlagsReadAsFalseForEnabledAndUseForCalls) {
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"enabled":1,"useForCalls":0})");
+	IMPULSE_CHECK(!state.enabled);
+	IMPULSE_CHECK(!state.useForCalls);
+}
+
+IMPULSE_TEST(ProxyStateStringFlagKeepsFallbackForOtherBooleans) {
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
+		R"({"useForTransport":"false","advanced":{"muxEnabled":"true","tcpFastOpen":"false"}})");
+	IMPULSE_CHECK(state.useForTransport);
+	IMPULSE_CHECK(!state.advanced.muxEnabled);
+	IMPULSE_CHECK(state.advanced.tcpFastOpen == Impulse::ProxyState::Advanced().tcpFastOpen);
+}
+
 IMPULSE_TEST(ProxyStateAdvancedIsSanitized) {
 	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
 		R"({"advanced":{"fragmentMode":"bogus","muxConcurrency":0,)"

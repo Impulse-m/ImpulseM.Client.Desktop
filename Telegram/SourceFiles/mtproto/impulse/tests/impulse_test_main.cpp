@@ -1,6 +1,8 @@
 #include "mtproto/impulse/tests/impulse_test.h"
 
 int main() {
+    // Unbuffered, so the last test name is visible when a test hangs.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     const std::vector<impulse::test::TestCase> &tests = impulse::test::testRegistry();
     const int total = static_cast<int>(tests.size());
     int failedTests = 0;

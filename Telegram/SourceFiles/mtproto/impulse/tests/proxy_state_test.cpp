@@ -35,16 +35,29 @@ IMPULSE_TEST(ProxyStateDecodeEmptyObjectDefaults) {
 	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode("{}");
 	IMPULSE_CHECK(!state.enabled);
 	IMPULSE_CHECK(state.useForTransport);
-	IMPULSE_CHECK(state.useForCalls);
+	IMPULSE_CHECK(!state.useForCalls);
 	IMPULSE_CHECK(!state.selectedId.has_value());
 	IMPULSE_CHECK(state.manual.empty());
 	IMPULSE_CHECK(state.subscriptions.empty());
 }
 
-IMPULSE_TEST(ProxyStateMissingUseForCallsReadsTrue) {
-	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"v":1,"useForTransport":false})");
-	IMPULSE_CHECK(!state.useForTransport);
+IMPULSE_TEST(ProxyStateNewStateUseForCallsDefaultsToTrue) {
+	const Impulse::ProxyState::State state = Impulse::ProxyState::State();
+	IMPULSE_CHECK(state.useForTransport);
 	IMPULSE_CHECK(state.useForCalls);
+	IMPULSE_CHECK(Impulse::ProxyState::Decode(Impulse::ProxyState::Encode(state)).useForCalls);
+}
+
+IMPULSE_TEST(ProxyStateMissingUseForCallsReadsFalse) {
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"v":1,"useForTransport":true})");
+	IMPULSE_CHECK(state.useForTransport);
+	IMPULSE_CHECK(!state.useForCalls);
+}
+
+IMPULSE_TEST(ProxyStateMissingUseForCallsWithBothOffIsRepairedToTransport) {
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"v":1,"useForTransport":false})");
+	IMPULSE_CHECK(state.useForTransport);
+	IMPULSE_CHECK(!state.useForCalls);
 }
 
 IMPULSE_TEST(ProxyStateExplicitUseForCallsFalseIsKept) {
@@ -161,7 +174,7 @@ IMPULSE_TEST(ProxyStateSubscriptionWithoutUrlIsSkipped) {
 IMPULSE_TEST(ProxyStateMistypedFieldKeepsDefault) {
 	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"enabled":"yes","useForCalls":1})");
 	IMPULSE_CHECK(!state.enabled);
-	IMPULSE_CHECK(state.useForCalls);
+	IMPULSE_CHECK(!state.useForCalls);
 }
 
 IMPULSE_TEST(ProxyStateAdvancedIsSanitized) {

@@ -535,7 +535,9 @@ State Decode(std::string_view text) {
 	State state = State();
 	state.enabled = ReadBool(root, "enabled", state.enabled);
 	state.useForTransport = ReadBool(root, "useForTransport", state.useForTransport);
-	state.useForCalls = ReadBool(root, "useForCalls", state.useForCalls);
+	// A stored useForCalls that is missing or not a boolean reads as false,
+	// as Android's codec does. The default of a new State is still true.
+	state.useForCalls = ReadBool(root, "useForCalls", false);
 	RepairToggles(state.useForTransport, state.useForCalls);
 	state.selectedId = ReadOptionalString(root, "selectedId");
 	state.manual = DecodeServers(ReadArray(root, "manual"));

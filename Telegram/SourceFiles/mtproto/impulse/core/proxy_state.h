@@ -101,9 +101,11 @@ struct State {
 [[nodiscard]] std::string Encode(const State &state);
 
 // Reads the state. Input that is not a JSON object gives the defaults. A
-// missing or mistyped field keeps its default, and a malformed server or
-// subscription is skipped. A server security is read as stored. Advanced
-// settings are sanitized. Both toggles off is repaired to useForTransport on.
+// missing or mistyped field keeps its default, except useForCalls, which
+// reads as false when the stored value is missing or not a boolean, as
+// Android does. A malformed server or subscription is skipped. A server
+// security is read as stored. Advanced settings are sanitized. Both toggles
+// off is repaired to useForTransport on.
 [[nodiscard]] State Decode(std::string_view text);
 
 } // namespace Impulse::ProxyState

@@ -3803,11 +3803,11 @@ void GroupCall::checkJoined() {
 				checkNextJoinAction();
 			}
 		} else {
-			// The poll is not re-armed here: the next join or share
-			// start arms it again, so a persistent failure does not
-			// keep the poll running.
-			LOG(("Call Info: Poll error '%1' in checkGroupCall, stopped."
+			// Android re-arms the poll after a generic error as well,
+			// so the check goes on while the camera or screen is shared.
+			LOG(("Call Info: Poll error '%1' in checkGroupCall, retrying."
 				).arg(type));
+			armCheckJoined();
 		}
 	}).send();
 }

@@ -953,6 +953,11 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 }
 
 std::string ImpulseConnection::currentCredential() {
+	// While the sockets are rebuilt for a new session, the old ones still carry
+	// the identity: nothing is declared until the rebuilt sockets present it.
+	if (rekeying) {
+		return std::string();
+	}
 	if (tokens->hasSession()) {
 		return tokens->bearer();
 	}

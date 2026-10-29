@@ -56,14 +56,53 @@ constexpr std::uint32_t kNewSessionCreatedConstructor = 0x9ec20908;
 // the constructor of that object, so the fields are written as zeros.
 constexpr std::size_t kNewSessionCreatedTailBytes = 24;
 
+// The digits of the percent-encoding of the userinfo part of a URL.
+constexpr std::string_view kPercentHexDigits = "0123456789ABCDEF";
+
+// Percent-encodes a proxy credential for the userinfo part of a URL (RFC 3986).
+// Only the unreserved characters stay as they are.
+[[nodiscard]] std::string PercentEncodeUserinfo(const std::string &value) {
+	std::string result;
+	result.reserve(value.size());
+	for (const char symbol : value) {
+		const unsigned char code = static_cast<unsigned char>(symbol);
+		const bool unreserved = (code >= 'A' && code <= 'Z')
+			|| (code >= 'a' && code <= 'z')
+			|| (code >= '0' && code <= '9')
+			|| code == '-'
+			|| code == '.'
+			|| code == '_'
+			|| code == '~';
+		if (unreserved) {
+			result.push_back(symbol);
+		} else {
+			result.push_back('%');
+			result.push_back(kPercentHexDigits[static_cast<std::size_t>(code >> 4)]);
+			result.push_back(kPercentHexDigits[static_cast<std::size_t>(code & 0x0F)]);
+		}
+	}
+	return result;
+}
+
 // The endpoint of the proxy as the Rust client takes it: http://host:port
-// for HTTP CONNECT, empty when the traffic goes direct.
+// for HTTP CONNECT, with the percent-encoded credentials in the userinfo part
+// when the endpoint has them. Empty when the traffic goes direct.
 [[nodiscard]] std::string ProxyUrlOf(
 		const std::optional<ProxyRouting::HttpEndpoint> &endpoint) {
 	if (!endpoint) {
 		return std::string();
 	}
-	return "http://" + endpoint->host + ":" + std::to_string(endpoint->port);
+	std::string url = "http://";
+	if (endpoint->hasCredentials) {
+		url += PercentEncodeUserinfo(endpoint->user);
+		url += ":";
+		url += PercentEncodeUserinfo(endpoint->password);
+		url += "@";
+	}
+	url += endpoint->host;
+	url += ":";
+	url += std::to_string(endpoint->port);
+	return url;
 }
 
 // The route is blocked: the endpoint is the discard port of the loopback.

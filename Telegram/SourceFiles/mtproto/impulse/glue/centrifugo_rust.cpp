@@ -288,6 +288,13 @@ std::int32_t CentrifugoRust::disconnect() {
 	return impulse_centrifugo_client_disconnect(state->client);
 }
 
+std::int32_t CentrifugoRust::reconnectNow() {
+	if (!ready()) {
+		return kCentrifugoStatusNotInitialized;
+	}
+	return impulse_centrifugo_client_reconnect_now(state->client);
+}
+
 std::int32_t CentrifugoRust::setEventCallback(EventCallback callback) {
 	if (!ready()) {
 		return kCentrifugoStatusNotInitialized;

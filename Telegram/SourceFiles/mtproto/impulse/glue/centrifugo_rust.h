@@ -153,6 +153,12 @@ public:
 	[[nodiscard]] std::int32_t connect();
 	[[nodiscard]] std::int32_t disconnect();
 
+	// Reconnects without waiting for the reconnect backoff, for when the app
+	// resumes. Replaces a socket that has been silent for longer than the ping
+	// interval plus the max server ping delay. Does nothing when the caller
+	// disconnected the client.
+	[[nodiscard]] std::int32_t reconnectNow();
+
 	// Receives the client events (connected, disconnected, publications of
 	// server-side subscriptions, errors). Publications and subscription events
 	// of subscribe() do not come here.

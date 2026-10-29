@@ -2065,7 +2065,7 @@ release:
 # umbrella stage has to see them, see there.
 tlottieRevision = '92df98dc20'
 walletEngineRevision = 'e59e0d89d7ee90c388bf36e3334c5b276f396697'
-centrifugoRevision = '780415a55677c3865a7b111b3b73602f2b0cad64'
+centrifugoRevision = '700e590b350099b80066e4d2cc8e585f69eae5d2'
 stage('tlottie', """
 version: 2
     git clone https://github.com/dkaraush/tlottie.git

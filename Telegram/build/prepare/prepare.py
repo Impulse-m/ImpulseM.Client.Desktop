@@ -591,8 +591,7 @@ win:
     SET "RUSTUP_HOME=%THIRDPARTY_DIR%\\rust\\rustup"
     SET "CARGO_HOME=%THIRDPARTY_DIR%\\rust\\cargo"
     rustup-init.exe -y --no-modify-path --profile minimal ^
-        --default-toolchain """ + rustToolchain + """ ^
-        --component rust-src
+        --default-toolchain """ + rustToolchain + """
     del rustup-init.exe
 mac:
     wget -O rustup-init.sh https://sh.rustup.rs
@@ -2118,24 +2117,17 @@ win:
 """)
 
 stage('tdesktop_rust', """
-version: 2.""" + tlottieRevision + '.' + walletEngineRevision + '.' + centrifugoRevision + """
+version: 3.""" + tlottieRevision + '.' + walletEngineRevision + '.' + centrifugoRevision + """
 depends:patches/wallet-engine.patch
 win:
     SET "RUSTUP_HOME=%THIRDPARTY_DIR%\\rust\\rustup"
     SET "CARGO_HOME=%THIRDPARTY_DIR%\\rust\\cargo"
     SET RUSTUP_TOOLCHAIN=""" + rustToolchain + """
     SET "PATH=%CARGO_HOME%\\bin;%PATH%"
-win32:
-    SET "RUST_TARGET=i686-win7-windows-msvc"
-    SET "RUST_BUILD_STD=-Z build-std=std,panic_abort"
-    SET "RUSTC_BOOTSTRAP=1"
 win64:
-    SET "RUST_TARGET=x86_64-win7-windows-msvc"
-    SET "RUST_BUILD_STD=-Z build-std=std,panic_abort"
-    SET "RUSTC_BOOTSTRAP=1"
+    SET "RUST_TARGET=x86_64-pc-windows-msvc"
 winarm:
     SET "RUST_TARGET=aarch64-pc-windows-msvc"
-    SET "RUST_BUILD_STD="
 win:
     cargo new --lib --vcs none tdesktop_rust
     cd tdesktop_rust
@@ -2147,7 +2139,6 @@ win:
     cargo add --path ..\\centrifugo_rust\\crates\\impulse-centrifugo-ffi
     cargo rustc --lib --release ^
         --crate-type staticlib --crate-type cdylib ^
-        %RUST_BUILD_STD% ^
         --target %RUST_TARGET% ^
         --config "profile.release.opt-level='z'" ^
         --config "profile.release.lto='thin'" ^

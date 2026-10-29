@@ -28,6 +28,7 @@ include(cmake/telegram_options.cmake)
 include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)
 include(cmake/lib_tgcalls.cmake)
+include(cmake/lib_livekit.cmake)
 include(cmake/lib_prisma.cmake)
 include(cmake/lib_fido2.cmake)
 include(cmake/lib_zxcvbn.cmake)
@@ -2541,37 +2542,27 @@ if (WIN32)
     #     $<IF:${release},"Appending compatibility manifest.","Finalizing build.">
     # )
 
-    if (QT_VERSION LESS 6 OR DESKTOP_APP_WIN7_BASELINE)
+    if (QT_VERSION LESS 6)
         target_link_libraries(Telegram PRIVATE desktop-app::win_directx_helper)
     endif()
 
-    if (DESKTOP_APP_WIN7_BASELINE)
-        # ANGLE loads d3dcompiler_47.dll from modules folder next to exe.
-        if (build_win64)
-            set(d3d_modules_subdir x64)
-        else()
-            set(d3d_modules_subdir x86)
-        endif()
-        set(d3d_modules_dir $<TARGET_FILE_DIR:Telegram>/modules/${d3d_modules_subdir}/d3d)
+    if (EXISTS ${livekit_ffi_dll})
         add_custom_command(TARGET Telegram POST_BUILD
         COMMAND
-            ${CMAKE_COMMAND} -E make_directory ${d3d_modules_dir}
+            ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:Telegram>/${livekit_ffi_modules_subdir}
         COMMAND
             ${CMAKE_COMMAND} -E copy_if_different
-            ${cmake_helpers_loc}/win_directx_helper/modules/${d3d_modules_subdir}/d3d/d3dcompiler_47.dll
-            ${d3d_modules_dir}/d3dcompiler_47.dll
+            ${livekit_ffi_dll}
+            $<TARGET_FILE_DIR:Telegram>/${livekit_ffi_modules_subdir}/livekit_ffi.dll
         COMMENT
-            "Copying d3dcompiler_47.dll for ANGLE."
+            "Copying livekit_ffi.dll for calls."
         VERBATIM
         )
+    else()
+        message(WARNING "livekit_ffi.dll is missing, run the livekit_ffi prepare stage: ${livekit_ffi_dll}")
     endif()
 
     target_link_options(Telegram PRIVATE /PDBPAGESIZE:8192)
-
-    if (DESKTOP_APP_WIN7_BASELINE)
-        # The loader reads the subsystem version as the minimal Windows.
-        target_link_options(Telegram PRIVATE /SUBSYSTEM:WINDOWS,6.01)
-    endif()
 elseif (APPLE)
     if (NOT DESKTOP_APP_USE_PACKAGED)
         target_link_libraries(Telegram PRIVATE desktop-app::external_iconv)

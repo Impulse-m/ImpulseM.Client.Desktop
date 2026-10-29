@@ -21,6 +21,11 @@ PRIVATE
     # name: the proxy glob also holds the libXray loader, which needs the
     # Windows base headers that this target does not have.
     core/impulse_proxy/xray_runtime.cpp
+    # Share link and subscription body conversion through the libXray invoker,
+    # Qt-free; proxy_subscription.cpp needs Qt and stays out of this target.
+    core/impulse_proxy/proxy_links.cpp
+    # Std-only request codec of the LiveKit FFI, tested with a recording fake.
+    calls/livekit/livekit_ffi_codec.cpp
 )
 
 target_link_libraries(impulse_tests

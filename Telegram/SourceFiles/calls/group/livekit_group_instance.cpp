@@ -183,10 +183,8 @@ void LiveKitGroupInstance::setIsMuted(bool isMuted) {
 		return;
 	}
 	muted = isMuted;
-	// The adapter publishes the microphone once and has no mute control, so a
-	// later mute does not stop audio that is already published.
-	if (!stopped && connected && !muted && !params.presentation && adapter) {
-		adapter->publishMicrophone();
+	if (!stopped && !params.presentation && adapter) {
+		adapter->setMicrophoneMuted(muted);
 	}
 }
 
@@ -242,7 +240,10 @@ void LiveKitGroupInstance::internal_addCustomNetworkEvent(bool) {
 void LiveKitGroupInstance::liveKitConnected() {
 	connected = true;
 	reportNetworkState(true);
-	if (!params.presentation && !muted && adapter) {
+	// A call that starts muted publishes the microphone muted, so no audio
+	// leaves the device until the mute is lifted.
+	if (!params.presentation && adapter) {
+		adapter->setMicrophoneMuted(muted);
 		adapter->publishMicrophone();
 	}
 }

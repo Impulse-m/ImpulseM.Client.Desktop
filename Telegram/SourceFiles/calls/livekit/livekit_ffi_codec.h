@@ -82,6 +82,17 @@ struct LiveKitHandleResponse final {
 	LiveKitTrackSource source,
 	std::optional<std::uint64_t> requestAsyncId);
 
+// Sets the mute state of a local audio or video track. The request is
+// synchronous: the response reports the state the library has now.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitLocalTrackMuteRequest(
+	std::uint64_t trackHandle,
+	bool mute);
+
+// Reads the muted field of a LocalTrackMuteResponse. Returns nullopt when the
+// response carries no LocalTrackMuteResponse.
+[[nodiscard]] std::optional<bool> DecodeLiveKitLocalTrackMuteResponse(
+	const std::vector<std::uint8_t> &response);
+
 // Reads the async id of a response that carries one (ConnectResponse,
 // PublishTrackResponse or DisconnectResponse) from the FfiResponse field
 // responseField.

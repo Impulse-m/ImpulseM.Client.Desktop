@@ -33,6 +33,7 @@ constexpr auto kCameraName = "camera";
 // URL and are never forwarded.
 constexpr auto kConnectFailed = "LiveKit connection failed";
 constexpr auto kPublishFailed = "LiveKit publish failed";
+constexpr auto kMuteFailed = "LiveKit mute failed";
 
 // Auto-subscribe stays on, as in Android's room defaults. Subscription and
 // E2EE wiring are added by the next task.
@@ -78,6 +79,11 @@ bool PublishTrack(
 		LiveKitTrackSource source,
 		LiveKitPublishKind kind);
 
+bool SetTrackMuted(
+		LiveKitAdapterShared &state,
+		std::uint64_t trackHandle,
+		bool muted);
+
 void DispatchConnect(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event);
@@ -103,6 +109,8 @@ struct LiveKitAdapterShared final {
 	bool disconnectRequested = false;
 	bool microphoneRequested = false;
 	bool cameraRequested = false;
+	bool microphoneMuted = true;
+	bool cameraEnabled = true;
 	std::optional<std::uint64_t> connectAsyncId;
 	std::optional<std::uint64_t> disconnectAsyncId;
 	std::map<std::uint64_t, LiveKitPublishKind> publishAsyncIds;
@@ -220,6 +228,14 @@ bool LiveKitAdapter::publishMicrophone() {
 		FailWith(state, kPublishFailed);
 		return false;
 	}
+	// The track is muted before it is published, so no audio is sent while the
+	// call starts muted.
+	if (!SetTrackMuted(
+			state,
+			*state.audioTrackHandle,
+			state.microphoneMuted)) {
+		return false;
+	}
 	return PublishTrack(
 		state,
 		*state.audioTrackHandle,
@@ -251,11 +267,37 @@ bool LiveKitAdapter::publishCamera(std::uint32_t width, std::uint32_t height) {
 		FailWith(state, kPublishFailed);
 		return false;
 	}
+	if (!SetTrackMuted(
+			state,
+			*state.videoTrackHandle,
+			!state.cameraEnabled)) {
+		return false;
+	}
 	return PublishTrack(
 		state,
 		*state.videoTrackHandle,
 		LiveKitTrackSource::Camera,
 		LiveKitPublishKind::Camera);
+}
+
+bool LiveKitAdapter::setMicrophoneMuted(bool muted) {
+	LiveKitAdapterShared &state = *shared;
+	state.microphoneMuted = muted;
+	if (!state.audioTrackHandle) {
+		// Applied when the track is created and published.
+		return true;
+	}
+	return SetTrackMuted(state, *state.audioTrackHandle, muted);
+}
+
+bool LiveKitAdapter::setCameraEnabled(bool enabled) {
+	LiveKitAdapterShared &state = *shared;
+	state.cameraEnabled = enabled;
+	if (!state.videoTrackHandle) {
+		// Applied when the camera track is published.
+		return true;
+	}
+	return SetTrackMuted(state, *state.videoTrackHandle, !enabled);
 }
 
 void LiveKitAdapter::disconnect() {
@@ -369,6 +411,23 @@ bool PublishTrack(
 		return false;
 	}
 	state.publishAsyncIds.emplace(*asyncId, kind);
+	return true;
+}
+
+bool SetTrackMuted(
+		LiveKitAdapterShared &state,
+		std::uint64_t trackHandle,
+		bool muted) {
+	const auto response = state.loader->request(
+		EncodeLiveKitLocalTrackMuteRequest(trackHandle, muted));
+	const std::optional<bool> confirmed = response
+		? DecodeLiveKitLocalTrackMuteResponse(*response)
+		: std::nullopt;
+	if (!confirmed || *confirmed != muted) {
+		// The track may still send, so the room is left instead of kept live.
+		FailWith(state, kMuteFailed);
+		return false;
+	}
 	return true;
 }
 

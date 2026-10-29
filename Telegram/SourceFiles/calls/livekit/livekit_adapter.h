@@ -56,6 +56,20 @@ public:
 	// Frames are pushed by the video wiring, not by this adapter.
 	bool publishCamera(std::uint32_t width, std::uint32_t height);
 
+	// Sets the microphone mute. A muted track sends no audio: the library
+	// mute request is sent to the track, and a track created while muted is
+	// muted before it is published. The state is kept until the room is
+	// released, and it starts muted. Returns false when the library did not
+	// confirm the request; the room is then failed, so no audio is left
+	// live.
+	bool setMicrophoneMuted(bool muted);
+
+	// Enables or disables the camera track. A disabled track sends no video.
+	// The state starts enabled and applies to a camera published later.
+	// Returns false when the library did not confirm the request; the room is
+	// then failed.
+	bool setCameraEnabled(bool enabled);
+
 	// Leaves the room and releases every owned handle. liveKitDisconnected
 	// fires once the library confirms the disconnect.
 	void disconnect();

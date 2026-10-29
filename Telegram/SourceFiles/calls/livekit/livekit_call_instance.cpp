@@ -33,9 +33,10 @@ void LiveKitInstance::setNetworkType(tgcalls::NetworkType type) {
 }
 
 void LiveKitInstance::setMuteMicrophone(bool mute) {
-	// The local microphone mute is applied by the media wiring. The value is
-	// kept here for it.
 	muteMicrophone = mute;
+	if (!stopped) {
+		adapter->setMicrophoneMuted(mute);
+	}
 }
 
 void LiveKitInstance::setAudioOutputGainControlEnabled(bool) {

@@ -17,6 +17,14 @@ constexpr std::uint32_t kFfiRequestCreateAudioTrack = 16;
 constexpr std::uint32_t kFfiRequestNewVideoSource = 21;
 constexpr std::uint32_t kFfiRequestNewAudioSource = 26;
 constexpr std::uint32_t kFfiRequestNewPlatformAudio = 77;
+constexpr std::uint32_t kFfiRequestLocalTrackMute = 17;
+constexpr std::uint32_t kFfiResponseLocalTrackMute = 17;
+
+// LocalTrackMuteRequest and LocalTrackMuteResponse fields (livekit-ffi
+// protocol, track messages).
+constexpr std::uint32_t kLocalTrackMuteTrackHandle = 1;
+constexpr std::uint32_t kLocalTrackMuteMute = 2;
+constexpr std::uint32_t kLocalTrackMuteMuted = 1;
 
 // DisposeRequest.async.
 constexpr std::uint32_t kDisposeAsync = 1;
@@ -266,6 +274,24 @@ std::vector<std::uint8_t> EncodeLiveKitPublishTrackRequest(
 		publish.writeVarintField(kPublishRequestAsyncId, *requestAsyncId);
 	}
 	return WrapFfiRequest(kFfiRequestPublishTrack, publish);
+}
+
+std::vector<std::uint8_t> EncodeLiveKitLocalTrackMuteRequest(
+		std::uint64_t trackHandle,
+		bool mute) {
+	ProtoWriter muteRequest;
+	muteRequest.writeVarintField(kLocalTrackMuteTrackHandle, trackHandle);
+	muteRequest.writeVarintField(kLocalTrackMuteMute, BoolValue(mute));
+	return WrapFfiRequest(kFfiRequestLocalTrackMute, muteRequest);
+}
+
+std::optional<bool> DecodeLiveKitLocalTrackMuteResponse(
+		const std::vector<std::uint8_t> &response) {
+	const auto message = FindMessage(response, kFfiResponseLocalTrackMute);
+	if (!message) {
+		return std::nullopt;
+	}
+	return FindVarint(*message, kLocalTrackMuteMuted).value_or(0) != 0;
 }
 
 std::optional<std::uint64_t> DecodeLiveKitAsyncId(

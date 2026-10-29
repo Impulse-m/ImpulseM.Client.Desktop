@@ -1415,6 +1415,20 @@ mac:
     cmake --install . --config MinSizeRel
 """)
 
+# LiveKit FFI for calls: the prebuilt Windows x86_64 archive of the pinned
+# rust-sdks release, checked against its sha256 before it is unpacked. The
+# archive holds livekit_ffi.dll (CRT-static, imports only system DLLs), its C
+# header and the licence. It lands in Libraries/win64/livekit.
+stage('livekit_ffi', """
+win64:
+    powershell -Command "iwr -OutFile ./livekit_ffi.zip https://github.com/livekit/rust-sdks/releases/download/livekit-ffi/v0.13.2/ffi-windows-x86_64.zip"
+    powershell -Command "if ((Get-FileHash -Algorithm SHA256 -Path ./livekit_ffi.zip).Hash.ToLower() -ne '000942e136deed010c85bd58a18743d5c3cc059af668084d5f4c62f5d6030270') { exit 1 }"
+    powershell -Command "Expand-Archive -Force -Path ./livekit_ffi.zip -DestinationPath ./livekit"
+    if not exist livekit\\livekit_ffi.dll exit /b 1
+    if not exist livekit\\livekit_ffi.h exit /b 1
+    del livekit_ffi.zip
+""")
+
 stage('openal-soft', """
     git clone https://github.com/telegramdesktop/openal-soft.git
     cd openal-soft

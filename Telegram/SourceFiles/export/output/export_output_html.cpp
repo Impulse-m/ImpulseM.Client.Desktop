@@ -217,7 +217,7 @@ QByteArray SerializeList(const std::vector<QByteArray> &values) {
 }
 
 QByteArray MakeLinks(const QByteArray &value) {
-	const auto domain = QByteArray("https://telegram.org/");
+	const auto domain = QByteArray("https://impulsem.net/");
 	auto result = QByteArray();
 	auto offset = 0;
 	while (true) {
@@ -3930,7 +3930,7 @@ auto HtmlWriter::Wrap::pushMessage(
 			dialog,
 			basePath,
 			"This message is not supported by this version "
-			"of Telegram Desktop. Please update the application.") };
+			"of ImpulseM Desktop. Please update the application.") };
 	}
 
 	const auto wrapReplyToLink = [&](const QByteArray &text) {
@@ -4060,7 +4060,7 @@ auto HtmlWriter::Wrap::pushMessage(
 		return "You have sent the following documents: "
 			+ SerializeList(list);
 	}, [&](const ActionContactSignUp &data) {
-		return serviceFrom + " joined Telegram";
+		return serviceFrom + " joined ImpulseM";
 	}, [&](const ActionGeoProximityReached &data) {
 		const auto fromName = peers.wrapPeerName(data.fromId);
 		const auto toName = peers.wrapPeerName(data.toId);
@@ -4148,7 +4148,7 @@ auto HtmlWriter::Wrap::pushMessage(
 		return serviceFrom
 			+ " sent you a gift for "
 			+ SerializeString(data.cost)
-			+ ": Telegram Premium for "
+			+ ": ImpulseM Premium for "
 			+ QString::number(data.days).toUtf8()
 			+ " days.";
 	}, [&](const ActionTopicCreate &data) {
@@ -4182,36 +4182,36 @@ auto HtmlWriter::Wrap::pushMessage(
 				: " set a new background for this chat");
 	}, [&](const ActionGiftCode &data) {
 		return data.unclaimed
-			? ("This is an unclaimed Telegram Premium for "
+			? ("This is an unclaimed ImpulseM Premium for "
 				+ NumberToString(data.days)
 				+ (data.days > 1 ? " days" : " day")
 				+ " prize in a giveaway organized by a channel.")
 			: data.viaGiveaway
-			? ("You won a Telegram Premium for "
+			? ("You won an ImpulseM Premium for "
 				+ NumberToString(data.days)
 				+ (data.days > 1 ? " days" : " day")
 				+ " prize in a giveaway organized by a channel.")
-			: ("You've received a Telegram Premium for "
+			: ("You've received an ImpulseM Premium for "
 				+ NumberToString(data.days)
 				+ (data.days > 1 ? " days" : " day")
 				+ " gift from a channel.");
 	}, [&](const ActionGiveawayLaunch &data) {
 		return serviceFrom + " just started a giveaway "
-			"of Telegram Premium subscriptions to its followers.";
+			"of ImpulseM Premium subscriptions to its followers.";
 	}, [&](const ActionGiveawayResults &data) {
 		return !data.winners
 			? "No winners of the giveaway could be selected."
 			: (data.credits && data.unclaimed)
 			? "Some winners of the giveaway were randomly selected by "
-				"Telegram and received their prize."
+				"ImpulseM and received their prize."
 			: (!data.credits && data.unclaimed)
 			? "Some winners of the giveaway were randomly selected by "
-				"Telegram and received private messages with giftcodes."
+				"ImpulseM and received private messages with giftcodes."
 			: (data.credits && !data.unclaimed)
 			? NumberToString(data.winners) + " of the giveaway was randomly "
-				"selected by Telegram and received their prize."
+				"selected by ImpulseM and received their prize."
 			: NumberToString(data.winners) + " of the giveaway was randomly "
-				"selected by Telegram and received private messages with "
+				"selected by ImpulseM and received private messages with "
 				"giftcodes.";
 	}, [&](const ActionBoostApply &data) {
 		return serviceFrom
@@ -4233,18 +4233,18 @@ auto HtmlWriter::Wrap::pushMessage(
 			+ SerializeString(data.cost)
 			+ ": "
 			+ QString::number(data.amount.value()).toUtf8()
-			+ (data.amount.ton() ? " TON." : " Telegram Stars.");
+			+ (data.amount.ton() ? " TON." : " ImpulseM Stars.");
 	}, [&](const ActionPrizeStars &data) {
 		return "You won a prize in a giveaway organized by "
 			+ peers.wrapPeerName(data.peerId)
 			+ ".\n Your prize is "
 			+ QString::number(data.amount).toUtf8()
-			+ " Telegram Stars.";
+			+ " ImpulseM Stars.";
 	}, [&](const ActionStarGift &data) {
 		return serviceFrom
 			+ " sent you a gift of "
 			+ QByteArray::number(data.stars)
-			+ " Telegram Stars.";
+			+ " ImpulseM Stars.";
 	}, [&](const ActionPaidMessagesRefunded &data) {
 		auto result = message.out
 			? ("You refunded "
@@ -4266,12 +4266,12 @@ auto HtmlWriter::Wrap::pushMessage(
 				? "Direct messages were disabled."
 				: ("Price per direct message changed to "
 					+ QString::number(data.stars).toUtf8()
-					+ " Telegram Stars.");
+					+ " ImpulseM Stars.");
 			return result;
 		}
 		auto result = "Price per message changed to "
 			+ QString::number(data.stars).toUtf8()
-			+ " Telegram Stars.";
+			+ " ImpulseM Stars.";
 		return result;
 	}, [&](const ActionTodoCompletions &data) {
 		auto completed = QByteArrayList();
@@ -5270,8 +5270,8 @@ QByteArray HtmlWriter::Wrap::pushGiveaway(
 			+ Data::NumberToString(data.quantity)
 			+ "</b> "
 			+ SerializeString((data.quantity > 1)
-				? "Telegram Premium Subscriptions"
-				: "Telegram Premium Subscription")
+				? "ImpulseM Premium Subscriptions"
+				: "ImpulseM Premium Subscription")
 			+ " for <b>" + Data::NumberToString(data.months) + "</b> "
 			+ (data.months > 1 ? "months." : "month."));
 	}
@@ -5392,7 +5392,7 @@ QByteArray HtmlWriter::Wrap::pushGiveaway(
 		+ SerializeString((data.winnersCount > 1) ? "winners" : "winner")
 		+ " of the "
 		+ wrapMessageLink(data.launchId, "Giveaway")
-		+ " was randomly selected by Telegram.");
+		+ " was randomly selected by ImpulseM.");
 	result.append(popTag());
 
 	result.append(pushDiv("section_title bold"));

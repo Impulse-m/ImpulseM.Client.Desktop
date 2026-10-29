@@ -2035,6 +2035,7 @@ release:
 # umbrella stage has to see them, see there.
 tlottieRevision = '92df98dc20'
 walletEngineRevision = 'e59e0d89d7ee90c388bf36e3334c5b276f396697'
+centrifugoRevision = '780415a55677c3865a7b111b3b73602f2b0cad64'
 stage('tlottie', """
 version: 2
     git clone https://github.com/dkaraush/tlottie.git
@@ -2071,8 +2072,22 @@ win_mac:
 # revisions ride in the version for that, and the counter in front of them
 # flushes a cache whose generated source the CI prune had already deleted.
 # The wallet-engine patch rewrites those sources, so it is a dependency here.
+#
+# The Centrifugo client is the Rust fork of the centrifuge-rust client, which
+# the umbrella links as a path dependency. Its checkout sits beside tlottie and
+# wallet-engine in Libraries, because cargo resolves the path relative to the
+# umbrella crate. The stage is Windows only; mac, docker and snap do not link it.
+stage('centrifugo_rust', """
+version: 1
+win:
+    git clone https://github.com/Impulse-m/ImpulseM.Centrifugo.Client.Rust.git centrifugo_rust
+    cd centrifugo_rust
+    git checkout """ + centrifugoRevision + """
+    git rev-parse HEAD | findstr /x """ + centrifugoRevision + """ >nul || exit /b 1
+""")
+
 stage('tdesktop_rust', """
-version: 2.""" + tlottieRevision + '.' + walletEngineRevision + """
+version: 2.""" + tlottieRevision + '.' + walletEngineRevision + '.' + centrifugoRevision + """
 depends:patches/wallet-engine.patch
 win:
     SET "RUSTUP_HOME=%THIRDPARTY_DIR%\\rust\\rustup"
@@ -2095,8 +2110,10 @@ win:
     cd tdesktop_rust
     echo pub use ::tlottie;> src\\lib.rs
     echo pub use ::wallet_engine;>> src\\lib.rs
+    echo pub use ::impulse_centrifugo_ffi;>> src\\lib.rs
     cargo add --path ..\\tlottie --features c-api
     cargo add --path ..\\wallet-engine
+    cargo add --path ..\\centrifugo_rust\\crates\\impulse-centrifugo-ffi
     cargo rustc --lib --release ^
         --crate-type staticlib --crate-type cdylib ^
         %RUST_BUILD_STD% ^
@@ -2109,8 +2126,10 @@ win:
         --config "target.%RUST_TARGET%.rustflags=['-C','target-feature=+crt-static']" ^
         -- --print native-static-libs
     mkdir out\\lib out\\include out\\include\\tlottie out\\include\\wallet_engine out\\src out\\src\\wallet_engine
+    mkdir out\\include\\impulse_centrifugo
     copy target\\%RUST_TARGET%\\release\\tdesktop_rust.lib out\\lib\\tdesktop_rust.lib
     copy ..\\tlottie\\include\\tlottie.h out\\include\\tlottie\\tlottie.h
+    copy ..\\centrifugo_rust\\crates\\impulse-centrifugo-ffi\\include\\impulse_centrifugo.h out\\include\\impulse_centrifugo\\
     cargo run --manifest-path ..\\wallet-engine\\bindgen\\cpp\\bindgen\\Cargo.toml --locked -- ^
         --library --out-dir out\\include\\wallet_engine ^
         target\\%RUST_TARGET%\\release\\tdesktop_rust.dll

@@ -3,9 +3,9 @@
 #ifdef _WIN32
 
 #include "base/platform/win/base_windows_safe_library.h"
+#include "calls/livekit/livekit_ffi_codec.h"
 
 #include <cstddef>
-#include <mutex>
 #include <utility>
 
 namespace Impulse {
@@ -15,32 +15,32 @@ namespace {
 // livekit-ffi).
 constexpr std::uint64_t kInvalidHandle = 0;
 
+// Identifies this client to the library and its logs.
+constexpr const char *kSdkName = "impulsem-desktop";
+constexpr const char *kSdkVersion = "1.0";
+
 using FfiCallbackFunction = void (*)(const std::uint8_t *, std::size_t);
 
-std::mutex EventHandlerMutex;
-LiveKitFfiLoader::EventHandler EventHandlerSlot;
+LiveKitEventRouter &ProcessEventRouter() {
+	static LiveKitEventRouter router;
+	return router;
+}
 
 extern "C" void LiveKitFfiEventCallback(
 		const std::uint8_t *data,
 		std::size_t length) {
-	LiveKitFfiLoader::EventHandler handler;
-	{
-		std::lock_guard<std::mutex> lock(EventHandlerMutex);
-		handler = EventHandlerSlot;
-	}
-	if (!handler || !data || !length) {
+	if (!data || !length) {
 		return;
 	}
 	try {
-		handler(std::vector<std::uint8_t>(data, data + length));
+		const LiveKitEvent event = DecodeLiveKitEvent(
+			std::vector<std::uint8_t>(data, data + length));
+		if (event.kind != LiveKitEventKind::Unknown) {
+			ProcessEventRouter().dispatch(event);
+		}
 	} catch (...) {
 		// An exception must not unwind into the library thread.
 	}
-}
-
-void SetEventHandler(LiveKitFfiLoader::EventHandler handler) {
-	std::lock_guard<std::mutex> lock(EventHandlerMutex);
-	EventHandlerSlot = std::move(handler);
 }
 
 } // namespace
@@ -110,19 +110,30 @@ LiveKitFfiLoader::LiveKitFfiLoader(const std::wstring &dllPath)
 
 LiveKitFfiLoader::~LiveKitFfiLoader() = default;
 
+std::shared_ptr<LiveKitFfiLoader> LiveKitFfiLoader::Process(
+		const std::wstring &dllPath) {
+	static const std::shared_ptr<LiveKitFfiLoader> loader = [&dllPath]() {
+		std::shared_ptr<LiveKitFfiLoader> created =
+			std::make_shared<LiveKitFfiLoader>(dllPath);
+		if (created->loaded()) {
+			created->initialize(false, kSdkName, kSdkVersion);
+		}
+		return created;
+	}();
+	return loader;
+}
+
 bool LiveKitFfiLoader::loaded() const {
 	return impl->module != nullptr;
 }
 
 bool LiveKitFfiLoader::initialize(
-		EventHandler handler,
 		bool captureLogs,
 		const std::string &sdk,
 		const std::string &sdkVersion) {
 	if (!loaded() || impl->initialized) {
 		return false;
 	}
-	SetEventHandler(std::move(handler));
 	impl->initializeCall(
 		&LiveKitFfiEventCallback,
 		captureLogs,
@@ -163,13 +174,16 @@ void LiveKitFfiLoader::dropHandle(std::uint64_t handle) {
 	impl->dropHandleCall(handle);
 }
 
+LiveKitEventRouter &LiveKitFfiLoader::eventRouter() {
+	return ProcessEventRouter();
+}
+
 void LiveKitFfiLoader::dispose() {
 	if (!loaded() || !impl->initialized) {
 		return;
 	}
 	impl->disposeCall();
 	impl->initialized = false;
-	SetEventHandler(nullptr);
 }
 
 } // namespace Impulse

@@ -1,7 +1,6 @@
 #include "calls/livekit/livekit_adapter.h"
 
-#ifdef _WIN32
-
+#include "calls/livekit/livekit_event_router.h"
 #include "calls/livekit/livekit_ffi_codec.h"
 #include "calls/livekit/livekit_ffi_loader.h"
 
@@ -24,16 +23,14 @@ constexpr std::uint32_t kResponseNewVideoSource = 21;
 constexpr std::uint32_t kResponseNewAudioSource = 26;
 constexpr std::uint32_t kResponseNewPlatformAudio = 76;
 
-constexpr auto kSdkName = "impulsem-desktop";
-constexpr auto kSdkVersion = "1.0";
-constexpr auto kMicrophoneName = "microphone";
-constexpr auto kCameraName = "camera";
+constexpr const char *kMicrophoneName = "microphone";
+constexpr const char *kCameraName = "camera";
 
 // Error texts are fixed. SDK messages can contain the authenticated WebSocket
 // URL and are never forwarded.
-constexpr auto kConnectFailed = "LiveKit connection failed";
-constexpr auto kPublishFailed = "LiveKit publish failed";
-constexpr auto kMuteFailed = "LiveKit mute failed";
+constexpr const char *kConnectFailed = "LiveKit connection failed";
+constexpr const char *kPublishFailed = "LiveKit publish failed";
+constexpr const char *kMuteFailed = "LiveKit mute failed";
 
 // Auto-subscribe stays on, as in Android's room defaults. Subscription and
 // E2EE wiring are added by the next task.
@@ -52,10 +49,10 @@ enum class Phase : std::uint8_t {
 };
 
 void DropHandle(
-		LiveKitFfiLoader &loader,
+		LiveKitFfi &library,
 		std::optional<std::uint64_t> &handle) {
 	if (handle) {
-		loader.dropHandle(*handle);
+		library.dropHandle(*handle);
 		handle.reset();
 	}
 }
@@ -65,7 +62,11 @@ std::optional<std::uint64_t> RequestHandle(
 		const std::vector<std::uint8_t> &request,
 		std::uint32_t responseField);
 
+void AddKey(LiveKitAdapterShared &state, std::uint64_t key);
+
 void ReleaseAll(LiveKitAdapterShared &state);
+
+void RetireIfDestroyed(LiveKitAdapterShared &state);
 
 void FailWith(LiveKitAdapterShared &state, const char *message);
 
@@ -102,8 +103,9 @@ void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event);
 
 struct LiveKitAdapterShared final {
 	LiveKitAdapterDelegate *delegate = nullptr;
-	LiveKitFfiLoader *loader = nullptr;
+	LiveKitFfi *library = nullptr;
 	LiveKitAdapter::Poster post;
+	LiveKitEventRouter::RouteId routeId = 0;
 	Phase phase = Phase::Idle;
 	bool alive = true;
 	bool disconnectRequested = false;
@@ -125,43 +127,47 @@ struct LiveKitAdapterShared final {
 };
 
 LiveKitAdapter::LiveKitAdapter(
-		const std::wstring &dllPath,
+		std::shared_ptr<LiveKitFfi> library,
 		LiveKitAdapterDelegate &delegate,
 		Poster post)
-: loader(std::make_unique<LiveKitFfiLoader>(dllPath))
+: ffi(std::move(library))
 , shared(std::make_shared<LiveKitAdapterShared>()) {
-	shared->delegate = &delegate;
-	shared->loader = loader.get();
-	shared->post = std::move(post);
-	if (!loader->loaded()) {
+	LiveKitAdapterShared &state = *shared;
+	state.delegate = &delegate;
+	state.library = ffi.get();
+	state.post = std::move(post);
+	if (!ffi->loaded()) {
 		return;
 	}
-	std::shared_ptr<LiveKitAdapterShared> state = shared;
-	loader->initialize(
-		[state](std::vector<std::uint8_t> bytes) {
-			LiveKitEvent event = DecodeLiveKitEvent(bytes);
-			if (event.kind == LiveKitEventKind::Unknown) {
-				return;
-			}
-			state->post([state, event = std::move(event)]() {
-				Dispatch(*state, event);
+	// The route keeps the state alive until the room is retired, so events
+	// that arrive after the adapter is destroyed still finish the disconnect.
+	const std::shared_ptr<LiveKitAdapterShared> owner = shared;
+	state.routeId = ffi->eventRouter().addRoute(
+		[owner](const LiveKitEvent &event) {
+			owner->post([owner, event]() {
+				Dispatch(*owner, event);
 			});
-		},
-		false,
-		std::string(kSdkName),
-		std::string(kSdkVersion));
+		});
 }
 
 LiveKitAdapter::~LiveKitAdapter() {
 	LiveKitAdapterShared &state = *shared;
-	if (state.phase == Phase::Connected && state.roomHandle) {
-		[[maybe_unused]] const auto response = loader->request(
-			EncodeLiveKitDisconnectRequest(*state.roomHandle, std::nullopt));
-	}
 	state.alive = false;
 	state.delegate = nullptr;
-	ReleaseAll(state);
-	loader->dispose();
+	if (!state.routeId) {
+		return;
+	}
+	if (state.phase == Phase::Connecting) {
+		// The room exists only when the library reports the connect, so the
+		// disconnect waits for that event.
+		state.disconnectRequested = true;
+	} else if (state.phase == Phase::Connected) {
+		SendDisconnect(state);
+	} else if (state.phase == Phase::Idle || state.phase == Phase::Failed) {
+		ReleaseAll(state);
+		state.phase = Phase::Idle;
+	}
+	RetireIfDestroyed(state);
 }
 
 bool LiveKitAdapter::connect(const std::string &url, const std::string &token) {
@@ -169,11 +175,11 @@ bool LiveKitAdapter::connect(const std::string &url, const std::string &token) {
 	if (state.phase != Phase::Idle) {
 		return false;
 	}
-	if (!loader->loaded()) {
+	if (!state.routeId) {
 		FailWith(state, kConnectFailed);
 		return false;
 	}
-	const auto response = loader->request(EncodeLiveKitConnectRequest(
+	const auto response = ffi->request(EncodeLiveKitConnectRequest(
 		url,
 		token,
 		DefaultRoomOptions(),
@@ -187,6 +193,7 @@ bool LiveKitAdapter::connect(const std::string &url, const std::string &token) {
 		return false;
 	}
 	state.connectAsyncId = asyncId;
+	AddKey(state, *asyncId);
 	state.phase = Phase::Connecting;
 	return true;
 }
@@ -326,26 +333,37 @@ std::optional<std::uint64_t> RequestHandle(
 		LiveKitAdapterShared &state,
 		const std::vector<std::uint8_t> &request,
 		std::uint32_t responseField) {
-	const auto response = state.loader->request(request);
+	const auto response = state.library->request(request);
 	if (!response) {
 		return std::nullopt;
 	}
 	return DecodeLiveKitHandleResponse(*response, responseField).handle;
 }
 
+// Routes the library events of the key to this room. The keys are cleared
+// when the room is released, so a closed room gets no events.
+void AddKey(LiveKitAdapterShared &state, std::uint64_t key) {
+	if (state.routeId) {
+		state.library->eventRouter().addKey(state.routeId, key);
+	}
+}
+
 void ReleaseAll(LiveKitAdapterShared &state) {
-	LiveKitFfiLoader &loader = *state.loader;
+	LiveKitFfi &library = *state.library;
 	for (const std::uint64_t handle : state.publicationHandles) {
-		loader.dropHandle(handle);
+		library.dropHandle(handle);
 	}
 	state.publicationHandles.clear();
-	DropHandle(loader, state.videoTrackHandle);
-	DropHandle(loader, state.videoSourceHandle);
-	DropHandle(loader, state.audioTrackHandle);
-	DropHandle(loader, state.audioSourceHandle);
-	DropHandle(loader, state.platformAudioHandle);
-	DropHandle(loader, state.localParticipantHandle);
-	DropHandle(loader, state.roomHandle);
+	DropHandle(library, state.videoTrackHandle);
+	DropHandle(library, state.videoSourceHandle);
+	DropHandle(library, state.audioTrackHandle);
+	DropHandle(library, state.audioSourceHandle);
+	DropHandle(library, state.platformAudioHandle);
+	DropHandle(library, state.localParticipantHandle);
+	DropHandle(library, state.roomHandle);
+	if (state.routeId) {
+		library.eventRouter().clearKeys(state.routeId);
+	}
 	state.publishAsyncIds.clear();
 	state.connectAsyncId.reset();
 	state.disconnectAsyncId.reset();
@@ -354,11 +372,25 @@ void ReleaseAll(LiveKitAdapterShared &state) {
 	state.cameraRequested = false;
 }
 
+// Removes the route of a destroyed adapter once its room is gone, so the
+// router keeps no state for it. A room that still waits for a connect or a
+// disconnect keeps its route.
+void RetireIfDestroyed(LiveKitAdapterShared &state) {
+	if (state.alive
+		|| !state.routeId
+		|| state.connectAsyncId
+		|| state.disconnectAsyncId) {
+		return;
+	}
+	state.library->eventRouter().removeRoute(state.routeId);
+	state.routeId = 0;
+}
+
 void FailWith(LiveKitAdapterShared &state, const char *message) {
 	// A connected room stays online until it is disconnected, so it is left
 	// before its handle is released.
-	if (state.phase == Phase::Connected && state.roomHandle && state.loader) {
-		[[maybe_unused]] const auto response = state.loader->request(
+	if (state.phase == Phase::Connected && state.roomHandle) {
+		[[maybe_unused]] const auto response = state.library->request(
 			EncodeLiveKitDisconnectRequest(*state.roomHandle, std::nullopt));
 	}
 	ReleaseAll(state);
@@ -366,6 +398,7 @@ void FailWith(LiveKitAdapterShared &state, const char *message) {
 	if (state.delegate) {
 		state.delegate->liveKitFailed(message);
 	}
+	RetireIfDestroyed(state);
 }
 
 void FinishDisconnected(LiveKitAdapterShared &state) {
@@ -374,10 +407,11 @@ void FinishDisconnected(LiveKitAdapterShared &state) {
 	if (state.delegate) {
 		state.delegate->liveKitDisconnected();
 	}
+	RetireIfDestroyed(state);
 }
 
 void SendDisconnect(LiveKitAdapterShared &state) {
-	const auto response = state.loader->request(
+	const auto response = state.library->request(
 		EncodeLiveKitDisconnectRequest(*state.roomHandle, std::nullopt));
 	std::optional<std::uint64_t> asyncId;
 	if (response) {
@@ -388,6 +422,7 @@ void SendDisconnect(LiveKitAdapterShared &state) {
 		return;
 	}
 	state.disconnectAsyncId = asyncId;
+	AddKey(state, *asyncId);
 	state.phase = Phase::Disconnecting;
 }
 
@@ -396,7 +431,7 @@ bool PublishTrack(
 		std::uint64_t trackHandle,
 		LiveKitTrackSource source,
 		LiveKitPublishKind kind) {
-	const auto response = state.loader->request(
+	const auto response = state.library->request(
 		EncodeLiveKitPublishTrackRequest(
 			*state.localParticipantHandle,
 			trackHandle,
@@ -411,6 +446,7 @@ bool PublishTrack(
 		return false;
 	}
 	state.publishAsyncIds.emplace(*asyncId, kind);
+	AddKey(state, *asyncId);
 	return true;
 }
 
@@ -418,7 +454,7 @@ bool SetTrackMuted(
 		LiveKitAdapterShared &state,
 		std::uint64_t trackHandle,
 		bool muted) {
-	const auto response = state.loader->request(
+	const auto response = state.library->request(
 		EncodeLiveKitLocalTrackMuteRequest(trackHandle, muted));
 	const std::optional<bool> confirmed = response
 		? DecodeLiveKitLocalTrackMuteResponse(*response)
@@ -452,6 +488,8 @@ void DispatchConnect(
 		}
 		return;
 	}
+	AddKey(state, *state.roomHandle);
+	AddKey(state, *state.localParticipantHandle);
 	state.phase = Phase::Connected;
 	if (state.disconnectRequested) {
 		state.disconnectRequested = false;
@@ -466,16 +504,22 @@ void DispatchConnect(
 void DispatchPublish(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event) {
-	const auto it = state.publishAsyncIds.find(event.asyncId);
+	const std::map<std::uint64_t, LiveKitPublishKind>::iterator it =
+		state.publishAsyncIds.find(event.asyncId);
 	if (it == state.publishAsyncIds.end()) {
 		return;
 	}
 	const LiveKitPublishKind kind = it->second;
 	state.publishAsyncIds.erase(it);
+	// A publish that ends while the room leaves is dropped with the room.
+	if (state.phase != Phase::Connected) {
+		return;
+	}
 	if (!event.error.empty() || !event.publicationHandle) {
 		FailWith(state, kPublishFailed);
 		return;
 	}
+	AddKey(state, *event.publicationHandle);
 	state.publicationHandles.push_back(*event.publicationHandle);
 	if (state.delegate) {
 		state.delegate->liveKitPublished(kind);
@@ -493,9 +537,6 @@ void DispatchDisconnect(
 }
 
 void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event) {
-	if (!state.alive) {
-		return;
-	}
 	if (event.kind == LiveKitEventKind::Connect) {
 		DispatchConnect(state, event);
 	} else if (event.kind == LiveKitEventKind::PublishTrack) {
@@ -507,5 +548,3 @@ void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event) {
 
 } // namespace
 } // namespace Impulse
-
-#endif // _WIN32

@@ -26,6 +26,11 @@ PRIVATE
     core/impulse_proxy/proxy_links.cpp
     # Std-only request codec of the LiveKit FFI, tested with a recording fake.
     calls/livekit/livekit_ffi_codec.cpp
+    # Event router and room adapter of the LiveKit FFI, tested with a recording
+    # fake of the library. The loader is not listed: it needs the Windows base
+    # headers.
+    calls/livekit/livekit_event_router.cpp
+    calls/livekit/livekit_adapter.cpp
 )
 
 target_link_libraries(impulse_tests

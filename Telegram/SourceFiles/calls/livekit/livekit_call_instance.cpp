@@ -1,5 +1,7 @@
 #include "calls/livekit/livekit_call_instance.h"
 
+#include "calls/livekit/livekit_ffi_loader.h"
+
 #include <utility>
 
 namespace Impulse {
@@ -17,7 +19,7 @@ LiveKitInstance::LiveKitInstance(
 : stateUpdated(std::move(descriptor.stateUpdated))
 , signalBarsUpdated(std::move(descriptor.signalBarsUpdated))
 , adapter(std::make_unique<LiveKitAdapter>(
-	dllPath,
+	LiveKitFfiLoader::Process(dllPath),
 	static_cast<LiveKitAdapterDelegate &>(*this),
 	std::move(post))) {
 }

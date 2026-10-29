@@ -1,7 +1,9 @@
-// LiveKit room adapter for 1:1 calls. It owns the FFI loader of one room,
-// connects the room, publishes the microphone (through PlatformAudio) and a
-// camera track, and disconnects. Subscription and E2EE are wired by the next
-// task. Conferences, RTMP and broadcast are not part of this adapter.
+// LiveKit room adapter for 1:1 calls. It owns one room on the library, connects
+// the room, publishes the microphone (through PlatformAudio) and a camera
+// track, mutes the tracks, and disconnects. Library events reach the adapter
+// through the event router of the library, so two adapters on one library each
+// get only the events of their own room. Conferences, RTMP and broadcast are
+// not part of this adapter.
 //
 // All public methods run on the owner thread. Library callbacks are decoded on
 // the library thread and handed to the owner thread through the poster.
@@ -14,7 +16,7 @@
 
 namespace Impulse {
 
-class LiveKitFfiLoader;
+class LiveKitFfi;
 struct LiveKitAdapterShared;
 
 enum class LiveKitPublishKind : std::uint8_t {
@@ -36,12 +38,19 @@ class LiveKitAdapter final {
 public:
 	using Poster = std::function<void(std::function<void()>)>;
 
+	// The library must outlive the adapter. Use LiveKitFfiLoader::Process for
+	// the process library.
 	LiveKitAdapter(
-		const std::wstring &dllPath,
+		std::shared_ptr<LiveKitFfi> library,
 		LiveKitAdapterDelegate &delegate,
 		Poster post);
 	LiveKitAdapter(const LiveKitAdapter &other) = delete;
 	LiveKitAdapter &operator=(const LiveKitAdapter &other) = delete;
+
+	// A connected room gets an explicit disconnect request, and a room that is
+	// still connecting is disconnected as soon as the library reports it. The
+	// handles of the room are released when the library confirms the
+	// disconnect. The library itself is not disposed.
 	~LiveKitAdapter();
 
 	// Starts the room connection. Returns false when the adapter is not idle.
@@ -77,7 +86,7 @@ public:
 	[[nodiscard]] bool connected() const;
 
 private:
-	std::unique_ptr<LiveKitFfiLoader> loader;
+	std::shared_ptr<LiveKitFfi> ffi;
 	std::shared_ptr<LiveKitAdapterShared> shared;
 };
 

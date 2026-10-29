@@ -3,6 +3,7 @@
 #ifdef _WIN32
 
 #include "base/random.h"
+#include "calls/livekit/livekit_ffi_loader.h"
 
 #include <crl/crl_on_main.h>
 
@@ -96,7 +97,7 @@ LiveKitGroupInstance::LiveKitGroupInstance(
 : networkStateUpdated(std::move(descriptor.networkStateUpdated))
 , params(config)
 , adapter(std::make_unique<LiveKitAdapter>(
-		config.dllPath,
+		LiveKitFfiLoader::Process(config.dllPath),
 		*this,
 		[](std::function<void()> task) {
 			crl::on_main(std::move(task));

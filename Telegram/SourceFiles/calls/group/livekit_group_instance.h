@@ -2,27 +2,40 @@
 // instance for calls that use the ImpulseM transport. The join payload is the
 // ssrc JSON that phone.joinGroupCall carries, and the join response carries
 // the LiveKit connection parameters of the room. A presentation instance is a
-// separate room that publishes no microphone.
+// separate room that publishes no microphone and publishes the screen share.
 //
-// Conferences, RTMP and broadcast are not part of this instance. Methods with
-// no LiveKit counterpart in this port (remote track volume, outgoing and
-// incoming video sinks, device selection, external audio) do nothing.
+// The instance drives its room through LiveKitAdapterInterface. The capture of
+// the camera (or of the screen, for a presentation) is pushed into the room
+// source as I420 frames, and the outgoing preview gets the same frames. Remote
+// video frames go to the incoming outputs of the endpoint, which is the LiveKit
+// identity of the participant; a presentation is the identity with the .p
+// suffix, as on Android.
+//
+// Conferences, RTMP and broadcast are not part of this instance. The remote
+// audio volume is not set, because the pinned protocol has no request for it,
+// and device selection and external audio do nothing, as Android has no device
+// override for LiveKit.
 //
 // All public methods run on the owner thread. Adapter callbacks are posted to
-// the owner thread by the adapter poster.
+// the owner thread by the adapter poster, and captured frames are posted from
+// the capture thread to the owner thread.
 #pragma once
 
-#include "calls/livekit/livekit_adapter.h"
+#include "base/weak_ptr.h"
+#include "calls/livekit/livekit_adapter_interface.h"
 
 #include <tgcalls/group/GroupInstanceImpl.h>
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace Impulse {
+
+using LiveKitFrameOutput = std::weak_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>>;
 
 struct LiveKitGroupParams final {
 	std::wstring dllPath;
@@ -32,14 +45,23 @@ struct LiveKitGroupParams final {
 
 class LiveKitGroupInstance final
 	: public tgcalls::GroupInstanceInterface
-	, private LiveKitAdapterDelegate {
+	, public base::has_weak_ptr
+	, private LiveKitAdapterDelegate
+	, private LiveKitVideoSink {
 private:
 	std::function<void(tgcalls::GroupNetworkState)> networkStateUpdated;
 	LiveKitGroupParams params;
+	std::unique_ptr<LiveKitAdapterInterface> adapter;
+	std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> captureSink;
+	std::shared_ptr<tgcalls::VideoCaptureInterface> videoCapture;
+	webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface> videoSource;
+	std::multimap<std::string, LiveKitFrameOutput> incomingOutputs;
+	std::vector<LiveKitFrameOutput> outgoingOutputs;
 	bool muted = false;
+	bool noiseSuppression = true;
 	bool connected = false;
 	bool stopped = false;
-	std::unique_ptr<LiveKitAdapter> adapter;
+	bool captureSourcePublished = false;
 
 public:
 	LiveKitGroupInstance(
@@ -132,7 +154,16 @@ private:
 	void liveKitDisconnected() override;
 
 
+	void liveKitVideoFrame(const LiveKitVideoFrame &frame) override;
+
+
 	void reportNetworkState(bool connected);
+
+
+	void handleCapturedFrame(const webrtc::VideoFrame &frame);
+
+
+	void releaseCaptures();
 
 };
 

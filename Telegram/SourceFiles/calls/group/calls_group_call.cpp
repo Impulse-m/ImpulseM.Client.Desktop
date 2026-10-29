@@ -1408,13 +1408,15 @@ void GroupCall::setCameraEndpoint(std::string endpoint) {
 void GroupCall::addVideoOutput(
 		const std::string &endpoint,
 		SinkPointer sink) {
+	// The own previews go through the instance that owns the capture, because
+	// the instance sets the single output of the capture to feed its room.
 	if (_cameraEndpoint == endpoint) {
-		if (auto strong = sink.data.lock()) {
-			_cameraCapture->setOutput(std::move(strong));
+		if (_instance) {
+			_instance->addOutgoingVideoOutput(std::move(sink.data));
 		}
 	} else if (_screenEndpoint == endpoint) {
-		if (auto strong = sink.data.lock()) {
-			_screenCapture->setOutput(std::move(strong));
+		if (_screenInstance) {
+			_screenInstance->addOutgoingVideoOutput(std::move(sink.data));
 		}
 	} else if (_instance) {
 		_instance->addIncomingVideoOutput(endpoint, std::move(sink.data));

@@ -12,6 +12,10 @@ This is the complete source code and the build instructions for the official [Te
 
 The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
 
+## ImpulseM fork
+
+This repository is the ImpulseM desktop client, a fork of Telegram Desktop that works with the ImpulseM backend. Its source code is at [Impulse-m/ImpulseM.Client.Desktop](https://github.com/Impulse-m/ImpulseM.Client.Desktop). The fork is distributed under the GPLv3 license with OpenSSL exception, like the upstream project. Modifications are described in [LEGAL](LEGAL), and the upstream copyright notices are kept.
+
 ## Supported systems
 
 The latest version is available for

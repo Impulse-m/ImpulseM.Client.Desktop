@@ -19,3 +19,14 @@ to link the code of portions of this program with the OpenSSL library.
 More information about the Telegram project: https://telegram.org
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
+
+Modifications by ImpulseM:
+
+This program includes modifications made by the ImpulseM project for the
+ImpulseM messaging service. The modifications are distributed under the same
+GNU General Public License version 3 (with the OpenSSL exception) as the
+original work. The complete corresponding source code of this modified version
+is available at https://github.com/Impulse-m/ImpulseM.Client.Desktop.
+
+The copyright notices of The Telegram Desktop Authors are retained in every
+file where they appear and are not changed by this notice.

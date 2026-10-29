@@ -43,6 +43,10 @@ public:
 	[[nodiscard]] std::optional<std::vector<std::uint8_t>> request(
 		std::span<const std::uint8_t> data);
 
+	// Releases an owned handle that the library handed out in a response or
+	// an event (room, participant, track, source or PlatformAudio handle).
+	void dropHandle(std::uint64_t handle);
+
 	// Calls livekit_ffi_dispose synchronously and allows initialize again.
 	void dispose();
 

@@ -156,6 +156,13 @@ std::optional<std::vector<std::uint8_t>> LiveKitFfiLoader::request(
 	return response;
 }
 
+void LiveKitFfiLoader::dropHandle(std::uint64_t handle) {
+	if (!loaded() || !impl->initialized || handle == kInvalidHandle) {
+		return;
+	}
+	impl->dropHandleCall(handle);
+}
+
 void LiveKitFfiLoader::dispose() {
 	if (!loaded() || !impl->initialized) {
 		return;

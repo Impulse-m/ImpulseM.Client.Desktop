@@ -521,7 +521,15 @@ void Updates::differenceDone(const MTPupdates_Difference &result) {
 		stateDone(d.vstate());
 	} break;
 	case mtpc_updates_differenceTooLong: {
-		LOG(("API Error: updates.differenceTooLong is not supported by Telegram Desktop!"));
+		const auto &d = result.c_updates_differenceTooLong();
+		setState(d.vpts().v, _updatesDate, _updatesQts, _updatesSeq);
+
+		_ptsWaiter.setRequesting(false);
+
+		MTP_LOG(0, ("getDifference "
+			"{ good - differenceTooLong received, restarting }%1"
+			).arg(_session->mtp().isTestMode() ? " TESTMODE" : ""));
+		getDifference();
 	} break;
 	};
 }

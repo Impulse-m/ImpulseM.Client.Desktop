@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/serialize_common.h"
 
 #include <algorithm>
+#include <cstddef>
 
 namespace Core {
 namespace {
@@ -119,6 +120,8 @@ QByteArray SettingsProxy::serialize() const {
 	const auto serializedList = ranges::views::all(
 		_list
 	) | ranges::views::transform(SerializeProxyData) | ranges::to_vector;
+	const auto serializedImpulseState = QByteArray::fromStdString(
+		Impulse::ProxyState::Encode(impulseState));
 
 	const auto size = 3 * sizeof(qint32)
 		+ Serialize::bytearraySize(serializedSelected)
@@ -128,7 +131,8 @@ QByteArray SettingsProxy::serialize() const {
 			0,
 			ranges::plus(),
 			&Serialize::bytearraySize)
-		+ (4 + int(_proxyRotationPreferredIndices.size())) * sizeof(qint32);
+		+ (4 + int(_proxyRotationPreferredIndices.size())) * sizeof(qint32)
+		+ Serialize::bytearraySize(serializedImpulseState);
 	auto stream = Serialize::ByteArrayWriter(size);
 	stream
 		<< qint32(_tryIPv6 ? 1 : 0)
@@ -147,6 +151,7 @@ QByteArray SettingsProxy::serialize() const {
 	for (const auto index : _proxyRotationPreferredIndices) {
 		stream << qint32(index);
 	}
+	stream << serializedImpulseState;
 	return std::move(stream).result();
 }
 
@@ -219,6 +224,11 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 		}
 	}
 
+	auto impulseJson = QByteArray();
+	if (!stream.atEnd()) {
+		stream >> impulseJson;
+	}
+
 	if (!stream.ok()) {
 		LOG(("App Error: "
 			"Bad data for Core::SettingsProxy::setFromSerialized()"));
@@ -248,6 +258,9 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 		}
 	}
 	setProxyRotationPreferredIndices(std::move(preferredIndices));
+	impulseState = Impulse::ProxyState::Decode(std::string_view(
+		impulseJson.constData(),
+		std::size_t(impulseJson.size())));
 
 	return true;
 }
@@ -280,6 +293,14 @@ void SettingsProxy::setProxyRotationPreferredIndices(std::vector<int> value) {
 	_proxyRotationPreferredIndices = NormalizeProxyRotationPreferredIndices(
 		std::move(value),
 		int(_list.size()));
+}
+
+const Impulse::ProxyState::State &SettingsProxy::impulseProxyState() const {
+	return impulseState;
+}
+
+void SettingsProxy::setImpulseProxyState(Impulse::ProxyState::State value) {
+	impulseState = std::move(value);
 }
 
 bool SettingsProxy::promoteProxyRotationPreferredIndex(int index) {

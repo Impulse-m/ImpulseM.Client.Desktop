@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "mtproto/impulse/core/proxy_state.h"
 #include "mtproto/mtproto_proxy_data.h"
 
 #include <array>
@@ -70,6 +71,9 @@ public:
 		MTP::ProxyData value);
 	[[nodiscard]] int indexInList(const MTP::ProxyData &value) const;
 
+	[[nodiscard]] const Impulse::ProxyState::State &impulseProxyState() const;
+	void setImpulseProxyState(Impulse::ProxyState::State value);
+
 	[[nodiscard]] QByteArray serialize() const;
 	bool setFromSerialized(const QByteArray &serialized);
 
@@ -83,6 +87,7 @@ private:
 	MTP::ProxyData _selected;
 	std::vector<MTP::ProxyData> _list;
 	std::vector<int> _proxyRotationPreferredIndices;
+	Impulse::ProxyState::State impulseState;
 
 	rpl::event_stream<> _connectionTypeChanges;
 

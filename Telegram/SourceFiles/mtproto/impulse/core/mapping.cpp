@@ -562,7 +562,7 @@ const Mapping &MappingTable::mapping() const noexcept {
 
 const MappingConstructor *MappingTable::findConstructor(
 		std::uint32_t id) const {
-	const auto found = constructorIndex.find(id);
+	const std::unordered_map<std::uint32_t, std::size_t>::const_iterator found = constructorIndex.find(id);
 	return found == constructorIndex.end()
 		? nullptr
 		: &data.constructors[found->second];
@@ -570,14 +570,14 @@ const MappingConstructor *MappingTable::findConstructor(
 
 const MappingConstructor *MappingTable::findConstructorByName(
 		std::string_view name) const {
-	const auto found = constructorNameIndex.find(std::string(name));
+	const std::unordered_map<std::string, std::size_t>::const_iterator found = constructorNameIndex.find(std::string(name));
 	return found == constructorNameIndex.end()
 		? nullptr
 		: &data.constructors[found->second];
 }
 
 const MappingMethod *MappingTable::findMethod(std::string_view name) const {
-	const auto found = methodIndex.find(std::string(name));
+	const std::unordered_map<std::string, std::size_t>::const_iterator found = methodIndex.find(std::string(name));
 	return found == methodIndex.end()
 		? nullptr
 		: &data.methods[found->second];
@@ -592,13 +592,13 @@ std::optional<std::uint32_t> MappingTable::methodId(
 const MappingField *MappingTable::findField(
 		std::uint32_t constructorId,
 		std::uint32_t number) const {
-	const auto found = constructorIndex.find(constructorId);
+	const std::unordered_map<std::uint32_t, std::size_t>::const_iterator found = constructorIndex.find(constructorId);
 	if (found == constructorIndex.end()) {
 		return nullptr;
 	}
 	const std::unordered_map<std::uint32_t, std::size_t> &numbers =
 		fieldIndex[found->second];
-	const auto field = numbers.find(number);
+	const std::unordered_map<std::uint32_t, std::size_t>::const_iterator field = numbers.find(number);
 	return field == numbers.end()
 		? nullptr
 		: &data.constructors[found->second].fields[field->second];

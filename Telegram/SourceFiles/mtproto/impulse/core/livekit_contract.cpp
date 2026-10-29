@@ -43,7 +43,7 @@ constexpr std::string_view kUriIllegalChars = "\"<>\\^`{|}";
 // userinfo and no fragment.
 [[nodiscard]] bool IsValidJoinUrl(const std::string &url) {
 	for (const char ch : url) {
-		const auto code = static_cast<unsigned char>(ch);
+		const unsigned char code = static_cast<unsigned char>(ch);
 		if (code <= ' '
 			|| code == 0x7F
 			|| kUriIllegalChars.find(ch) != std::string_view::npos) {
@@ -58,24 +58,24 @@ constexpr std::string_view kUriIllegalChars = "\"<>\\^`{|}";
 			return false;
 		}
 	}
-	const auto schemeEnd = url.find(':');
+	const std::size_t schemeEnd = url.find(':');
 	if (schemeEnd == std::string::npos) {
 		return false;
 	}
-	const auto scheme = std::string_view(url).substr(0, schemeEnd);
+	const std::string_view scheme = std::string_view(url).substr(0, schemeEnd);
 	if (scheme != kWsScheme && scheme != kWssScheme) {
 		return false;
 	}
-	const auto markerStart = schemeEnd + 1;
+	const std::size_t markerStart = schemeEnd + 1;
 	if (url.compare(markerStart, kAuthorityMarker.size(), kAuthorityMarker)) {
 		return false;
 	}
 	if (url.find('#') != std::string::npos) {
 		return false;
 	}
-	const auto authorityStart = schemeEnd + 1 + kAuthorityMarker.size();
-	const auto authorityEnd = url.find_first_of("/?", authorityStart);
-	const auto authority = std::string_view(url).substr(
+	const std::size_t authorityStart = schemeEnd + 1 + kAuthorityMarker.size();
+	const std::size_t authorityEnd = url.find_first_of("/?", authorityStart);
+	const std::string_view authority = std::string_view(url).substr(
 		authorityStart,
 		(authorityEnd == std::string::npos)
 			? std::string::npos
@@ -83,9 +83,9 @@ constexpr std::string_view kUriIllegalChars = "\"<>\\^`{|}";
 	if (authority.find('@') != std::string_view::npos) {
 		return false;
 	}
-	auto host = authority;
+	std::string_view host = authority;
 	if (!host.empty() && host.front() == '[') {
-		const auto close = host.find(']');
+		const std::size_t close = host.find(']');
 		if (close == std::string_view::npos) {
 			return false;
 		}
@@ -94,9 +94,9 @@ constexpr std::string_view kUriIllegalChars = "\"<>\\^`{|}";
 		host = host.substr(0, host.find(':'));
 	}
 	// Brackets are legal in java.net.URI only around an IPv6 host.
-	const auto ipv6 = !host.empty() && host.front() == '[';
-	const auto openCount = std::count(url.begin(), url.end(), '[');
-	const auto closeCount = std::count(url.begin(), url.end(), ']');
+	const bool ipv6 = !host.empty() && host.front() == '[';
+	const std::ptrdiff_t openCount = std::count(url.begin(), url.end(), '[');
+	const std::ptrdiff_t closeCount = std::count(url.begin(), url.end(), ']');
 	if (openCount != (ipv6 ? 1 : 0) || closeCount != openCount) {
 		return false;
 	}
@@ -106,11 +106,11 @@ constexpr std::string_view kUriIllegalChars = "\"<>\\^`{|}";
 [[nodiscard]] std::optional<std::string> RequiredString(
 		const Json::Value &object,
 		std::string_view name) {
-	const auto value = object.find(name);
+	const Json::Value *value = object.find(name);
 	if (!value) {
 		return std::nullopt;
 	}
-	const auto text = value->asString();
+	const std::string *text = value->asString();
 	if (!text || IsBlank(*text)) {
 		return std::nullopt;
 	}
@@ -130,17 +130,17 @@ std::optional<JoinParameters> ParseOneToOneJoin(
 	if (callId <= 0) {
 		return std::nullopt;
 	}
-	const auto parsed = Json::parse(json);
+	const Json::ParseResult parsed = Json::parse(json);
 	if (!parsed.value || !parsed.value->asObject()) {
 		return std::nullopt;
 	}
-	const auto *livekit = parsed.value->find("livekit");
+	const Json::Value *livekit = parsed.value->find("livekit");
 	if (!livekit || !livekit->asObject()) {
 		return std::nullopt;
 	}
-	auto url = RequiredString(*livekit, "url");
-	auto token = RequiredString(*livekit, "token");
-	auto room = RequiredString(*livekit, "room");
+	std::optional<std::string> url = RequiredString(*livekit, "url");
+	std::optional<std::string> token = RequiredString(*livekit, "token");
+	std::optional<std::string> room = RequiredString(*livekit, "room");
 	if (!url || !token || !room) {
 		return std::nullopt;
 	}

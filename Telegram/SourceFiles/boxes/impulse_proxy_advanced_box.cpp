@@ -30,25 +30,25 @@ namespace {
 
 using Advanced = Impulse::ProxyState::Advanced;
 
-constexpr auto kFragmentOff = "off";
-constexpr auto kFragmentClassic = "classic";
-constexpr auto kFragmentFinalMask = "finalmask";
-constexpr auto kPacketsDefault = "tlshello";
-constexpr auto kPacketsExample = "1-3";
-constexpr auto kDnsSystem = "system";
-constexpr auto kDnsCloudflare = "cloudflare";
-constexpr auto kDnsGoogle = "google";
-constexpr auto kDnsCustom = "custom";
-constexpr auto kPingBatch = "batch";
-constexpr auto kPingSequential = "sequential";
-constexpr auto kHttpsPrefixSize = 8;
-constexpr auto kMaxPort = 65535;
-constexpr auto kMaxKeepAlive = 86400;
-constexpr auto kMaxPingPause = 10000;
-constexpr auto kMaxPingTimeout = 30;
-constexpr auto kMaxMuxConcurrency = 128;
-constexpr auto kMinMss = 64;
-constexpr auto kMaxMss = 1460;
+constexpr const char *kFragmentOff = "off";
+constexpr const char *kFragmentClassic = "classic";
+constexpr const char *kFragmentFinalMask = "finalmask";
+constexpr const char *kPacketsDefault = "tlshello";
+constexpr const char *kPacketsExample = "1-3";
+constexpr const char *kDnsSystem = "system";
+constexpr const char *kDnsCloudflare = "cloudflare";
+constexpr const char *kDnsGoogle = "google";
+constexpr const char *kDnsCustom = "custom";
+constexpr const char *kPingBatch = "batch";
+constexpr const char *kPingSequential = "sequential";
+constexpr int kHttpsPrefixSize = 8;
+constexpr int kMaxPort = 65535;
+constexpr int kMaxKeepAlive = 86400;
+constexpr int kMaxPingPause = 10000;
+constexpr int kMaxPingTimeout = 30;
+constexpr int kMaxMuxConcurrency = 128;
+constexpr int kMinMss = 64;
+constexpr int kMaxMss = 1460;
 
 enum class NumberUnit {
 	Plain,
@@ -57,7 +57,7 @@ enum class NumberUnit {
 };
 
 [[nodiscard]] const std::vector<std::string> &FragmentModes() {
-	static const auto modes = std::vector<std::string>{
+	static const std::vector<std::string> modes = std::vector<std::string>{
 		kFragmentOff,
 		kFragmentClassic,
 		kFragmentFinalMask,
@@ -66,7 +66,7 @@ enum class NumberUnit {
 }
 
 [[nodiscard]] const std::vector<std::string> &DnsModes() {
-	static const auto modes = std::vector<std::string>{
+	static const std::vector<std::string> modes = std::vector<std::string>{
 		kDnsSystem,
 		kDnsCloudflare,
 		kDnsGoogle,
@@ -76,7 +76,7 @@ enum class NumberUnit {
 }
 
 [[nodiscard]] const std::vector<std::string> &PingModes() {
-	static const auto modes = std::vector<std::string>{
+	static const std::vector<std::string> modes = std::vector<std::string>{
 		kPingBatch,
 		kPingSequential,
 	};
@@ -84,7 +84,7 @@ enum class NumberUnit {
 }
 
 [[nodiscard]] const std::vector<std::string> &Fingerprints() {
-	static const auto fingerprints = std::vector<std::string>{
+	static const std::vector<std::string> fingerprints = std::vector<std::string>{
 		"chrome",
 		"firefox",
 		"safari",
@@ -102,7 +102,7 @@ enum class NumberUnit {
 [[nodiscard]] int IndexOf(
 		const std::vector<std::string> &values,
 		const std::string &value) {
-	for (auto i = 0; i < int(values.size()); ++i) {
+	for (int i = 0; i < int(values.size()); ++i) {
 		if (values[i] == value) {
 			return i;
 		}
@@ -122,9 +122,9 @@ enum class NumberUnit {
 	if (text.isEmpty() || text.size() > 9) {
 		return std::nullopt;
 	}
-	auto value = 0;
+	int value = 0;
 	for (const QChar symbol : text) {
-		const auto code = symbol.unicode();
+		const char16_t code = symbol.unicode();
 		if (code < u'0' || code > u'9') {
 			return std::nullopt;
 		}
@@ -138,12 +138,12 @@ enum class NumberUnit {
 
 // "N" or "N-M" with 0 <= N <= M <= 65535.
 [[nodiscard]] bool IsRangeText(const QString &text) {
-	const auto dash = text.indexOf(u'-');
+	const qsizetype dash = text.indexOf(u'-');
 	if (dash < 0) {
 		return ParseNumber(text, 0, kMaxPort).has_value();
 	}
-	const auto low = ParseNumber(text.left(dash), 0, kMaxPort);
-	const auto high = ParseNumber(text.mid(dash + 1), 0, kMaxPort);
+	const std::optional<int> low = ParseNumber(text.left(dash), 0, kMaxPort);
+	const std::optional<int> high = ParseNumber(text.mid(dash + 1), 0, kMaxPort);
 	return low && high && (*low <= *high);
 }
 
@@ -162,11 +162,11 @@ enum class NumberUnit {
 	if (text.startsWith(u"https://"_q)) {
 		return IsHttpsAddressText(text);
 	}
-	const auto parts = text.split(u'.', Qt::KeepEmptyParts);
+	const QStringList parts = text.split(u'.', Qt::KeepEmptyParts);
 	if (parts.size() != 4) {
 		return false;
 	}
-	for (const auto &part : parts) {
+	for (const QString &part : parts) {
 		if (part.size() > 3 || !ParseNumber(part, 0, 255)) {
 			return false;
 		}
@@ -223,8 +223,8 @@ enum class NumberUnit {
 }
 
 [[nodiscard]] QString NumberError(NumberUnit unit, int min, int max) {
-	const auto low = QString::number(min);
-	const auto high = QString::number(max);
+	const QString low = QString::number(min);
+	const QString high = QString::number(max);
 	if (unit == NumberUnit::Millis) {
 		return tr::lng_impulse_proxy_adv_ms_error(
 			tr::now,
@@ -251,7 +251,7 @@ enum class NumberUnit {
 // Writes the whole advanced block. The restart of the core is decided by the
 // application, from the core part of the settings.
 void SaveAdvanced(const Advanced &advanced) {
-	auto state = Core::App().settings().proxy().impulseProxyState();
+	Impulse::ProxyState::State state = Core::App().settings().proxy().impulseProxyState();
 	state.advanced = advanced;
 	Core::App().settings().proxy().setImpulseProxyState(std::move(state));
 	Core::App().saveSettingsDelayed();
@@ -268,8 +268,8 @@ void ShowChoice(
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(title));
 
-		const auto group = std::make_shared<Ui::RadiobuttonGroup>(selected);
-		for (auto i = 0; i < int(labels.size()); ++i) {
+		const std::shared_ptr<Ui::RadiobuttonGroup> group = std::make_shared<Ui::RadiobuttonGroup>(selected);
+		for (int i = 0; i < int(labels.size()); ++i) {
 			box->addRow(object_ptr<Ui::Radiobutton>(
 				box,
 				group,
@@ -297,8 +297,8 @@ void ShowTextInput(
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(title));
 
-		const auto inner = box->verticalLayout();
-		const auto field = inner->add(
+		const not_null<Ui::VerticalLayout*> inner = box->verticalLayout();
+		Ui::InputField *const field = inner->add(
 			object_ptr<Ui::InputField>(
 				inner,
 				st::defaultInputField,
@@ -311,7 +311,7 @@ void ShowTextInput(
 		Ui::AddDividerText(inner, rpl::single(error));
 
 		const auto submit = [=] {
-			const auto text = field->getLastText().trimmed();
+			const QString text = field->getLastText().trimmed();
 			if (apply(text)) {
 				box->closeBox();
 			} else {
@@ -340,7 +340,7 @@ void ShowNumberInput(
 		NumberError(unit, min, max),
 		true,
 		[=](const QString &text) {
-			const auto value = ParseNumber(text, min, max);
+			const std::optional<int> value = ParseNumber(text, min, max);
 			if (!value) {
 				return false;
 			}
@@ -363,18 +363,18 @@ void ImpulseProxyAdvancedBox::setupContent() {
 
 	addButton(tr::lng_box_ok(), [=] { closeBox(); });
 
-	auto wrap = object_ptr<Ui::VerticalLayout>(this);
-	const auto content = wrap.data();
+	object_ptr<Ui::VerticalLayout> wrap = object_ptr<Ui::VerticalLayout>(this);
+	Ui::VerticalLayout *const content = wrap.data();
 	setInnerWidget(object_ptr<Ui::OverrideMargins>(this, std::move(wrap)));
 
-	const auto show = uiShow();
-	const auto advanced = Ui::CreateChild<rpl::variable<Advanced>>(
+	const std::shared_ptr<Ui::Show> show = uiShow();
+	rpl::variable<Advanced> *const advanced = Ui::CreateChild<rpl::variable<Advanced>>(
 		content,
 		Core::App().settings().proxy().impulseProxyState().advanced);
 
 	// Stores one edit. Nothing is saved when the edit changes nothing.
 	const auto change = [=](Fn<void(Advanced &)> edit) {
-		auto next = advanced->current();
+		Advanced next = advanced->current();
 		edit(next);
 		if (next == advanced->current()) {
 			return;
@@ -400,7 +400,7 @@ void ImpulseProxyAdvancedBox::setupContent() {
 			not_null<Ui::VerticalLayout*> parent,
 			rpl::producer<QString> text,
 			bool Advanced::*field) {
-		const auto button = parent->add(object_ptr<Ui::SettingsButton>(
+		Ui::SettingsButton *const button = parent->add(object_ptr<Ui::SettingsButton>(
 			parent,
 			std::move(text),
 			st::settingsButtonNoIcon));
@@ -424,7 +424,7 @@ void ImpulseProxyAdvancedBox::setupContent() {
 			return FragmentModeName(value.fragmentMode);
 		}),
 		[=] {
-			const auto current = advanced->current().fragmentMode;
+			const std::string current = advanced->current().fragmentMode;
 			ShowChoice(
 				show,
 				tr::lng_impulse_proxy_adv_mode(tr::now),
@@ -441,11 +441,11 @@ void ImpulseProxyAdvancedBox::setupContent() {
 				});
 		});
 
-	const auto fragment = content->add(
+	Ui::SlideWrap<Ui::VerticalLayout> *const fragment = content->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 			content,
 			object_ptr<Ui::VerticalLayout>(content)));
-	const auto fragmentRows = fragment->entity();
+	Ui::VerticalLayout *const fragmentRows = fragment->entity();
 	advanced->value() | rpl::on_next([=](const Advanced &value) {
 		fragment->toggle(
 			value.fragmentMode != kFragmentOff,
@@ -459,8 +459,8 @@ void ImpulseProxyAdvancedBox::setupContent() {
 			return Text(value.fragmentPackets);
 		}),
 		[=] {
-			const auto current = advanced->current().fragmentPackets;
-			const auto selected = (current == kPacketsDefault)
+			const std::string current = advanced->current().fragmentPackets;
+			const int selected = (current == kPacketsDefault)
 				? 0
 				: (current == kPacketsExample)
 				? 1
@@ -568,13 +568,13 @@ void ImpulseProxyAdvancedBox::setupContent() {
 				: Text(value.fingerprint);
 		}),
 		[=] {
-			auto labels = std::vector<QString>{
+			std::vector<QString> labels = std::vector<QString>{
 				tr::lng_impulse_proxy_adv_as_in_link(tr::now),
 			};
-			for (const auto &name : Fingerprints()) {
+			for (const std::string &name : Fingerprints()) {
 				labels.push_back(Text(name));
 			}
-			const auto current = advanced->current().fingerprint;
+			const std::string current = advanced->current().fingerprint;
 			ShowChoice(
 				show,
 				tr::lng_impulse_proxy_adv_fingerprint(tr::now),
@@ -593,7 +593,7 @@ void ImpulseProxyAdvancedBox::setupContent() {
 	// Multiplexing.
 	Ui::AddSubsectionTitle(content, tr::lng_impulse_proxy_adv_multiplexing());
 	addToggle(content, tr::lng_impulse_proxy_adv_mux(), &Advanced::muxEnabled);
-	const auto mux = content->add(
+	Ui::SlideWrap<Ui::VerticalLayout> *const mux = content->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 			content,
 			object_ptr<Ui::VerticalLayout>(content)));
@@ -679,7 +679,7 @@ void ImpulseProxyAdvancedBox::setupContent() {
 				tr::lng_impulse_proxy_adv_mss_error(tr::now),
 				true,
 				[=](const QString &text) {
-					const auto value = ParseNumber(text, 0, kMaxMss);
+					const std::optional<int> value = ParseNumber(text, 0, kMaxMss);
 					if (!value || (*value != 0 && *value < kMinMss)) {
 						return false;
 					}
@@ -700,7 +700,7 @@ void ImpulseProxyAdvancedBox::setupContent() {
 			return DnsName(value);
 		}),
 		[=] {
-			const auto current = advanced->current();
+			const Advanced current = advanced->current();
 			ShowChoice(
 				show,
 				tr::lng_impulse_proxy_adv_dns_server(tr::now),

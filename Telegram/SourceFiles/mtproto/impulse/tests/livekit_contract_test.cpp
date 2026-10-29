@@ -32,11 +32,11 @@ IMPULSE_TEST(LiveKitOneToOneRoomName) {
 
 IMPULSE_TEST(LiveKitJoinAcceptsValidWss) {
 	using Impulse::LiveKit::ParseOneToOneJoin;
-	const auto json = JoinJson(
+	const std::string json = JoinJson(
 		"wss://project.livekit.cloud",
 		"token-value",
 		"p.7");
-	const auto parsed = ParseOneToOneJoin(json, 7);
+	const std::optional<Impulse::LiveKit::JoinParameters> parsed = ParseOneToOneJoin(json, 7);
 	IMPULSE_CHECK(parsed.has_value());
 	if (parsed) {
 		IMPULSE_CHECK(parsed->url == "wss://project.livekit.cloud");
@@ -83,7 +83,7 @@ IMPULSE_TEST(LiveKitJoinRejectsUserinfoFragmentAndNoHost) {
 
 IMPULSE_TEST(LiveKitJoinRejectsRoomMismatchAndBadCallId) {
 	using Impulse::LiveKit::ParseOneToOneJoin;
-	const auto url = std::string("wss://project.livekit.cloud");
+	const std::string url = std::string("wss://project.livekit.cloud");
 	IMPULSE_CHECK(!ParseOneToOneJoin(JoinJson(url, "t", "p.4"), 3).has_value());
 	IMPULSE_CHECK(!ParseOneToOneJoin(JoinJson(url, "t", "g.3"), 3).has_value());
 	IMPULSE_CHECK(!ParseOneToOneJoin(JoinJson(url, "t", "p.3"), 0).has_value());

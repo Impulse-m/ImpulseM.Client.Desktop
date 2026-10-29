@@ -32,7 +32,7 @@ IMPULSE_TEST(ProxyStateDecodeNonObjectGivesDefaults) {
 }
 
 IMPULSE_TEST(ProxyStateDecodeEmptyObjectDefaults) {
-	const auto state = Impulse::ProxyState::Decode("{}");
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode("{}");
 	IMPULSE_CHECK(!state.enabled);
 	IMPULSE_CHECK(state.useForTransport);
 	IMPULSE_CHECK(state.useForCalls);
@@ -42,19 +42,19 @@ IMPULSE_TEST(ProxyStateDecodeEmptyObjectDefaults) {
 }
 
 IMPULSE_TEST(ProxyStateMissingUseForCallsReadsTrue) {
-	const auto state = Impulse::ProxyState::Decode(R"({"v":1,"useForTransport":false})");
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"v":1,"useForTransport":false})");
 	IMPULSE_CHECK(!state.useForTransport);
 	IMPULSE_CHECK(state.useForCalls);
 }
 
 IMPULSE_TEST(ProxyStateExplicitUseForCallsFalseIsKept) {
-	const auto state = Impulse::ProxyState::Decode(R"({"v":1,"useForCalls":false})");
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"v":1,"useForCalls":false})");
 	IMPULSE_CHECK(state.useForTransport);
 	IMPULSE_CHECK(!state.useForCalls);
 }
 
 IMPULSE_TEST(ProxyStateBothTogglesOffIsRepairedOnDecode) {
-	const auto state = Impulse::ProxyState::Decode(R"({"useForTransport":false,"useForCalls":false})");
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"useForTransport":false,"useForCalls":false})");
 	IMPULSE_CHECK(state.useForTransport);
 	IMPULSE_CHECK(!state.useForCalls);
 }
@@ -63,13 +63,13 @@ IMPULSE_TEST(ProxyStateBothTogglesOffIsRepairedOnEncode) {
 	Impulse::ProxyState::State state;
 	state.useForTransport = false;
 	state.useForCalls = false;
-	const auto restored = Impulse::ProxyState::Decode(Impulse::ProxyState::Encode(state));
+	const Impulse::ProxyState::State restored = Impulse::ProxyState::Decode(Impulse::ProxyState::Encode(state));
 	IMPULSE_CHECK(restored.useForTransport);
 	IMPULSE_CHECK(!restored.useForCalls);
 }
 
 IMPULSE_TEST(ProxyStateEncodeStartsWithVersion) {
-	const auto text = Impulse::ProxyState::Encode(Impulse::ProxyState::State());
+	const std::string text = Impulse::ProxyState::Encode(Impulse::ProxyState::State());
 	IMPULSE_CHECK(text.rfind("{\"v\":1,", 0) == 0);
 }
 
@@ -80,7 +80,7 @@ IMPULSE_TEST(ProxyStateRoundTripKeepsEverything) {
 	state.useForCalls = false;
 	state.selectedId = std::string("abc123");
 
-	auto manual = MakeServer("m1", "tls");
+	Impulse::ProxyState::Server manual = MakeServer("m1", "tls");
 	manual.shareLink = std::string("vless://uuid@node.example.com:443?type=ws#Node");
 	state.manual.push_back(manual);
 
@@ -109,7 +109,7 @@ IMPULSE_TEST(ProxyStateRoundTripKeepsEverything) {
 	state.advanced.pingUrl = "https://example.com/ping";
 	state.advanced.pingSkipWhileConnected = false;
 
-	const auto restored = Impulse::ProxyState::Decode(Impulse::ProxyState::Encode(state));
+	const Impulse::ProxyState::State restored = Impulse::ProxyState::Decode(Impulse::ProxyState::Encode(state));
 	IMPULSE_CHECK(restored == state);
 }
 
@@ -121,7 +121,7 @@ IMPULSE_TEST(ProxyStateSelectedIdAbsentStaysAbsent) {
 }
 
 IMPULSE_TEST(ProxyStateServerSecurityIsReadAsStored) {
-	const auto state = Impulse::ProxyState::Decode(
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
 		R"({"manual":[)"
 		R"({"id":"a","name":"A","host":"h","port":1,"network":"ws","security":"xtls","outbound":"{}"},)"
 		R"({"id":"b","name":"B","host":"h","port":2,"network":"ws","security":"tls","outbound":"{}"}]})");
@@ -134,7 +134,7 @@ IMPULSE_TEST(ProxyStateServerSecurityIsReadAsStored) {
 }
 
 IMPULSE_TEST(ProxyStateMalformedServerIsSkipped) {
-	const auto state = Impulse::ProxyState::Decode(
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
 		R"({"manual":[)"
 		R"({"id":"a","name":"A","host":"h","network":"ws","security":"none","outbound":"{}"},)"
 		R"("not an object",)"
@@ -147,7 +147,7 @@ IMPULSE_TEST(ProxyStateMalformedServerIsSkipped) {
 }
 
 IMPULSE_TEST(ProxyStateSubscriptionWithoutUrlIsSkipped) {
-	const auto state = Impulse::ProxyState::Decode(
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
 		R"({"subscriptions":[{"id":"x"},{"id":"y","url":"https://e.test/s"}]})");
 	IMPULSE_CHECK(state.subscriptions.size() == 1);
 	if (state.subscriptions.size() != 1) {
@@ -159,17 +159,17 @@ IMPULSE_TEST(ProxyStateSubscriptionWithoutUrlIsSkipped) {
 }
 
 IMPULSE_TEST(ProxyStateMistypedFieldKeepsDefault) {
-	const auto state = Impulse::ProxyState::Decode(R"({"enabled":"yes","useForCalls":1})");
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(R"({"enabled":"yes","useForCalls":1})");
 	IMPULSE_CHECK(!state.enabled);
 	IMPULSE_CHECK(state.useForCalls);
 }
 
 IMPULSE_TEST(ProxyStateAdvancedIsSanitized) {
-	const auto state = Impulse::ProxyState::Decode(
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
 		R"({"advanced":{"fragmentMode":"bogus","muxConcurrency":0,)"
 		R"("dnsMode":"custom","dnsCustom":"","pingUrl":"http://x",)"
 		R"("pingTimeoutSeconds":99,"tcpMaxSeg":10,"fingerprint":"nope"}})");
-	const auto &advanced = state.advanced;
+	const Impulse::ProxyState::Advanced &advanced = state.advanced;
 	IMPULSE_CHECK(advanced.fragmentMode == "off");
 	IMPULSE_CHECK(advanced.muxConcurrency == 8);
 	IMPULSE_CHECK(advanced.dnsMode == "system");
@@ -180,14 +180,14 @@ IMPULSE_TEST(ProxyStateAdvancedIsSanitized) {
 }
 
 IMPULSE_TEST(ProxyStateAdvancedDefaultsWhenMissing) {
-	const auto state = Impulse::ProxyState::Decode("{}");
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode("{}");
 	IMPULSE_CHECK(state.advanced == Impulse::ProxyState::Advanced());
 	IMPULSE_CHECK(state.advanced.fragmentFromLink);
 	IMPULSE_CHECK(state.advanced.pingSkipWhileConnected);
 }
 
 IMPULSE_TEST(ProxyStateLargeIntegerIsExact) {
-	const auto state = Impulse::ProxyState::Decode(
+	const Impulse::ProxyState::State state = Impulse::ProxyState::Decode(
 		R"({"subscriptions":[{"id":"x","url":"https://e.test/s","updatedAt":9007199254740993}]})");
 	IMPULSE_CHECK(state.subscriptions.size() == 1);
 	if (state.subscriptions.size() != 1) {
@@ -198,7 +198,7 @@ IMPULSE_TEST(ProxyStateLargeIntegerIsExact) {
 
 IMPULSE_TEST(ProxyStateCoreKeyIgnoresPingSettings) {
 	Impulse::ProxyState::Advanced first;
-	auto second = first;
+	Impulse::ProxyState::Advanced second = first;
 	second.pingMode = "sequential";
 	second.pingPauseMillis = 250;
 	second.pingTimeoutSeconds = 9;

@@ -212,7 +212,7 @@ constexpr std::uint32_t kComponentSize = 3;
 [[nodiscard]] std::optional<std::string> FindString(
 		std::span<const std::uint8_t> data,
 		std::uint32_t field) {
-	const auto bytes = FindMessage(data, field);
+	const std::optional<std::span<const std::uint8_t>> bytes = FindMessage(data, field);
 	if (!bytes) {
 		return std::nullopt;
 	}
@@ -247,7 +247,7 @@ constexpr std::uint32_t kComponentSize = 3;
 // field 1, for example OwnedTrack or OwnedVideoSource.
 [[nodiscard]] std::optional<std::uint64_t> OwnedHandleId(
 		std::span<const std::uint8_t> owned) {
-	const auto handle = FindMessage(owned, kOwnedHandleMessage);
+	const std::optional<std::span<const std::uint8_t>> handle = FindMessage(owned, kOwnedHandleMessage);
 	if (!handle) {
 		return std::nullopt;
 	}
@@ -550,7 +550,7 @@ std::vector<std::uint8_t> EncodeLiveKitLocalTrackMuteRequest(
 
 std::optional<bool> DecodeLiveKitLocalTrackMuteResponse(
 		const std::vector<std::uint8_t> &response) {
-	const auto message = FindMessage(response, kFfiResponseLocalTrackMute);
+	const std::optional<std::span<const std::uint8_t>> message = FindMessage(response, kFfiResponseLocalTrackMute);
 	if (!message) {
 		return std::nullopt;
 	}
@@ -560,7 +560,7 @@ std::optional<bool> DecodeLiveKitLocalTrackMuteResponse(
 std::optional<std::uint64_t> DecodeLiveKitAsyncId(
 		const std::vector<std::uint8_t> &response,
 		std::uint32_t responseField) {
-	const auto message = FindMessage(response, responseField);
+	const std::optional<std::span<const std::uint8_t>> message = FindMessage(response, responseField);
 	if (!message) {
 		return std::nullopt;
 	}
@@ -571,14 +571,14 @@ LiveKitHandleResponse DecodeLiveKitHandleResponse(
 		const std::vector<std::uint8_t> &response,
 		std::uint32_t responseField) {
 	LiveKitHandleResponse result;
-	const auto message = FindMessage(response, responseField);
+	const std::optional<std::span<const std::uint8_t>> message = FindMessage(response, responseField);
 	if (!message) {
 		return result;
 	}
-	if (const auto error = FindString(*message, kErrorString)) {
+	if (const std::optional<std::string> error = FindString(*message, kErrorString)) {
 		result.error = *error;
 	}
-	const auto owned = FindMessage(*message, kOwnedMessage);
+	const std::optional<std::span<const std::uint8_t>> owned = FindMessage(*message, kOwnedMessage);
 	if (owned) {
 		result.handle = OwnedHandleId(*owned);
 	}
@@ -609,17 +609,17 @@ LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 				DecodeVideoStreamEvent(payload, result);
 				return result;
 			}
-			if (const auto asyncId = FindVarint(payload, kAsyncId)) {
+			if (const std::optional<std::uint64_t> asyncId = FindVarint(payload, kAsyncId)) {
 				result.asyncId = *asyncId;
 			}
 			if (field == kEventDisconnect) {
 				result.kind = LiveKitEventKind::Disconnect;
 			} else if (field == kEventPublishTrack) {
 				result.kind = LiveKitEventKind::PublishTrack;
-				if (const auto error = FindString(payload, kErrorString)) {
+				if (const std::optional<std::string> error = FindString(payload, kErrorString)) {
 					result.error = *error;
 				}
-				const auto publication = FindMessage(
+				const std::optional<std::span<const std::uint8_t>> publication = FindMessage(
 					payload,
 					kPublishCallbackPublication);
 				if (publication) {
@@ -627,22 +627,22 @@ LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 				}
 			} else {
 				result.kind = LiveKitEventKind::Connect;
-				if (const auto error = FindString(
+				if (const std::optional<std::string> error = FindString(
 						payload,
 						kConnectCallbackError)) {
 					result.error = *error;
 				}
-				const auto callbackResult = FindMessage(
+				const std::optional<std::span<const std::uint8_t>> callbackResult = FindMessage(
 					payload,
 					kConnectCallbackResult);
 				if (callbackResult) {
-					const auto room = FindMessage(
+					const std::optional<std::span<const std::uint8_t>> room = FindMessage(
 						*callbackResult,
 						kConnectResultRoom);
 					if (room) {
 						result.roomHandle = OwnedHandleId(*room);
 					}
-					const auto participant = FindMessage(
+					const std::optional<std::span<const std::uint8_t>> participant = FindMessage(
 						*callbackResult,
 						kConnectResultLocalParticipant);
 					if (participant) {

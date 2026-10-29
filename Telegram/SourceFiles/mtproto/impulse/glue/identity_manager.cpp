@@ -147,7 +147,7 @@ constexpr std::uint32_t Base64UrlBufferMask = 0xFFFF;
 }
 
 [[nodiscard]] TokenBlob blobFromToken(const std::string &token) {
-	const auto *data = reinterpret_cast<const std::uint8_t *>(token.data());
+	const std::uint8_t *data = reinterpret_cast<const std::uint8_t *>(token.data());
 	return TokenBlob(data, data + token.size());
 }
 

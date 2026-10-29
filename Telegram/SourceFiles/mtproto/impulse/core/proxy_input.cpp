@@ -46,7 +46,7 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 	if (text.size() < prefix.size()) {
 		return false;
 	}
-	for (auto index = std::size_t(0); index < prefix.size(); ++index) {
+	for (std::size_t index = std::size_t(0); index < prefix.size(); ++index) {
 		if (LowerAscii(text[index]) != LowerAscii(prefix[index])) {
 			return false;
 		}
@@ -88,10 +88,10 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 // padding. Returns nullopt for any other symbol and for a single trailing
 // symbol, which carries no whole byte.
 [[nodiscard]] std::optional<std::string> DecodeBase64(std::string_view text) {
-	auto result = std::string();
+	std::string result = std::string();
 	result.reserve(text.size() / 4 * 3 + 3);
-	auto bits = std::uint32_t(0);
-	auto count = 0;
+	std::uint32_t bits = std::uint32_t(0);
+	int count = 0;
 	for (const char symbol : text) {
 		if (symbol == '=') {
 			break;
@@ -99,7 +99,7 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 		if (IsWhitespaceSymbol(symbol)) {
 			continue;
 		}
-		const auto value = Base64Value(symbol);
+		const int value = Base64Value(symbol);
 		if (value < 0) {
 			return std::nullopt;
 		}
@@ -130,8 +130,8 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 // Decimal with an optional sign. Nullopt for an empty digit string, any other
 // symbol or a value outside int64.
 [[nodiscard]] std::optional<std::int64_t> ParseDecimal(std::string_view text) {
-	auto negative = false;
-	auto digits = text;
+	bool negative = false;
+	std::string_view digits = text;
 	if (!digits.empty() && (digits.front() == '+' || digits.front() == '-')) {
 		negative = digits.front() == '-';
 		digits.remove_prefix(1);
@@ -139,14 +139,14 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 	if (digits.empty()) {
 		return std::nullopt;
 	}
-	const auto limit = std::uint64_t(std::numeric_limits<std::int64_t>::max())
+	const std::uint64_t limit = std::uint64_t(std::numeric_limits<std::int64_t>::max())
 		+ (negative ? 1 : 0);
-	auto magnitude = std::uint64_t(0);
+	std::uint64_t magnitude = std::uint64_t(0);
 	for (const char symbol : digits) {
 		if (symbol < '0' || symbol > '9') {
 			return std::nullopt;
 		}
-		const auto digit = std::uint64_t(symbol - '0');
+		const std::uint64_t digit = std::uint64_t(symbol - '0');
 		if (magnitude > (limit - digit) / 10) {
 			return std::nullopt;
 		}
@@ -162,16 +162,16 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 	if (!header) {
 		return std::nullopt;
 	}
-	const auto value = Trim(*header);
+	const std::string_view value = Trim(*header);
 	if (value.empty()) {
 		return std::nullopt;
 	}
 	if (value.starts_with(kBase64Prefix)) {
-		const auto bytes = DecodeBase64(value.substr(kBase64Prefix.size()));
+		const std::optional<std::string> bytes = DecodeBase64(value.substr(kBase64Prefix.size()));
 		if (!bytes) {
 			return std::nullopt;
 		}
-		const auto decoded = Trim(*bytes);
+		const std::string_view decoded = Trim(*bytes);
 		if (decoded.empty()) {
 			return std::nullopt;
 		}
@@ -186,17 +186,17 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 	if (!header) {
 		return -1;
 	}
-	auto rest = *header;
+	std::string_view rest = *header;
 	while (true) {
-		const auto split = rest.find(';');
-		const auto part = (split == std::string_view::npos)
+		const std::size_t split = rest.find(';');
+		const std::string_view part = (split == std::string_view::npos)
 			? rest
 			: rest.substr(0, split);
-		const auto equals = part.find('=');
+		const std::size_t equals = part.find('=');
 		if (equals != std::string_view::npos) {
-			const auto name = Trim(part.substr(0, equals));
+			const std::string_view name = Trim(part.substr(0, equals));
 			if (EqualsIgnoreCase(name, key)) {
-				const auto parsed = ParseDecimal(Trim(part.substr(equals + 1)));
+				const std::optional<std::int64_t> parsed = ParseDecimal(Trim(part.substr(equals + 1)));
 				return parsed ? *parsed : -1;
 			}
 		}
@@ -211,7 +211,7 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 	if (!header) {
 		return kDefaultUpdateIntervalHours;
 	}
-	const auto parsed = ParseDecimal(Trim(*header));
+	const std::optional<std::int64_t> parsed = ParseDecimal(Trim(*header));
 	if (!parsed
 		|| *parsed > std::numeric_limits<std::int32_t>::max()
 		|| *parsed < std::numeric_limits<std::int32_t>::min()) {
@@ -223,8 +223,8 @@ constexpr char kHexDigits[] = "0123456789abcdef";
 } // namespace
 
 std::string_view Trim(std::string_view text) {
-	auto begin = std::size_t(0);
-	auto end = text.size();
+	std::size_t begin = std::size_t(0);
+	std::size_t end = text.size();
 	while (begin < end && IsTrimSymbol(text[begin])) {
 		++begin;
 	}
@@ -235,7 +235,7 @@ std::string_view Trim(std::string_view text) {
 }
 
 InputKind Detect(std::string_view text) {
-	const auto value = Trim(text);
+	const std::string_view value = Trim(text);
 	if (value.empty()) {
 		return InputKind::Unknown;
 	}
@@ -244,10 +244,10 @@ InputKind Detect(std::string_view text) {
 		&& !ContainsWhitespace(value)) {
 		return InputKind::Subscription;
 	}
-	auto rest = value;
+	std::string_view rest = value;
 	while (true) {
-		const auto newline = rest.find('\n');
-		const auto line = Trim((newline == std::string_view::npos)
+		const std::size_t newline = rest.find('\n');
+		const std::string_view line = Trim((newline == std::string_view::npos)
 			? rest
 			: rest.substr(0, newline));
 		if (StartsWithIgnoreCase(line, kLinksPrefix)) {
@@ -261,10 +261,10 @@ InputKind Detect(std::string_view text) {
 }
 
 std::string SubscriptionId(std::string_view url) {
-	const auto digest = Sha256(Trim(url));
-	auto result = std::string();
+	const Sha256Digest digest = Sha256(Trim(url));
+	std::string result = std::string();
 	result.reserve(kSubscriptionIdLength);
-	for (auto index = std::size_t(0); index < kSubscriptionIdLength / 2; ++index) {
+	for (std::size_t index = std::size_t(0); index < kSubscriptionIdLength / 2; ++index) {
 		result.push_back(kHexDigits[digest[index] >> 4]);
 		result.push_back(kHexDigits[digest[index] & 0x0F]);
 	}
@@ -295,7 +295,7 @@ SubscriptionMeta ParseMeta(
 		std::optional<std::string_view> profileTitle,
 		std::optional<std::string_view> userInfo,
 		std::optional<std::string_view> updateInterval) {
-	auto result = SubscriptionMeta();
+	SubscriptionMeta result = SubscriptionMeta();
 	result.title = ParseTitle(profileTitle);
 	result.upload = UserInfoValue(userInfo, "upload");
 	result.download = UserInfoValue(userInfo, "download");

@@ -80,33 +80,33 @@ IMPULSE_TEST(ProxyInputErrorStrings) {
 
 IMPULSE_TEST(ProxyInputMetaTitlePlainIsTrimmed) {
 	using Impulse::ProxyInput::ParseMeta;
-	const auto meta = ParseMeta(std::string_view(" My Sub "), std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta meta = ParseMeta(std::string_view(" My Sub "), std::nullopt, std::nullopt);
 	IMPULSE_CHECK(meta.title.has_value());
 	IMPULSE_CHECK(*meta.title == "My Sub");
 }
 
 IMPULSE_TEST(ProxyInputMetaTitleBase64Decodes) {
 	using Impulse::ProxyInput::ParseMeta;
-	const auto meta = ParseMeta(std::string_view("base64:SGVsbG8="), std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta meta = ParseMeta(std::string_view("base64:SGVsbG8="), std::nullopt, std::nullopt);
 	IMPULSE_CHECK(meta.title.has_value());
 	IMPULSE_CHECK(*meta.title == "Hello");
 }
 
 IMPULSE_TEST(ProxyInputMetaTitleBadOrEmptyBase64IsAbsent) {
 	using Impulse::ProxyInput::ParseMeta;
-	const auto bad = ParseMeta(std::string_view("base64:!!!"), std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta bad = ParseMeta(std::string_view("base64:!!!"), std::nullopt, std::nullopt);
 	IMPULSE_CHECK(!bad.title.has_value());
-	const auto empty = ParseMeta(std::string_view("base64:"), std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta empty = ParseMeta(std::string_view("base64:"), std::nullopt, std::nullopt);
 	IMPULSE_CHECK(!empty.title.has_value());
-	const auto blank = ParseMeta(std::string_view("   "), std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta blank = ParseMeta(std::string_view("   "), std::nullopt, std::nullopt);
 	IMPULSE_CHECK(!blank.title.has_value());
-	const auto absent = ParseMeta(std::nullopt, std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta absent = ParseMeta(std::nullopt, std::nullopt, std::nullopt);
 	IMPULSE_CHECK(!absent.title.has_value());
 }
 
 IMPULSE_TEST(ProxyInputMetaUserInfoParses) {
 	using Impulse::ProxyInput::ParseMeta;
-	const auto meta = ParseMeta(
+	const Impulse::ProxyInput::SubscriptionMeta meta = ParseMeta(
 		std::nullopt,
 		std::string_view("upload=1; download=2;total=3; EXPIRE=4"),
 		std::nullopt);
@@ -118,12 +118,12 @@ IMPULSE_TEST(ProxyInputMetaUserInfoParses) {
 
 IMPULSE_TEST(ProxyInputMetaUserInfoMissingOrBadIsMinusOne) {
 	using Impulse::ProxyInput::ParseMeta;
-	const auto absent = ParseMeta(std::nullopt, std::nullopt, std::nullopt);
+	const Impulse::ProxyInput::SubscriptionMeta absent = ParseMeta(std::nullopt, std::nullopt, std::nullopt);
 	IMPULSE_CHECK(absent.upload == -1);
 	IMPULSE_CHECK(absent.download == -1);
 	IMPULSE_CHECK(absent.total == -1);
 	IMPULSE_CHECK(absent.expire == -1);
-	const auto bad = ParseMeta(
+	const Impulse::ProxyInput::SubscriptionMeta bad = ParseMeta(
 		std::nullopt,
 		std::string_view("upload=1;download=x;total=3=4"),
 		std::nullopt);

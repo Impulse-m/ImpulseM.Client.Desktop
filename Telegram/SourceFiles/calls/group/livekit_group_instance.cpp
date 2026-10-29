@@ -21,7 +21,7 @@
 namespace Impulse {
 namespace {
 
-constexpr auto kInvalidJoinFailure = "Invalid LiveKit group parameters";
+constexpr const char *kInvalidJoinFailure = "Invalid LiveKit group parameters";
 
 struct LiveKitJoin final {
 	std::string url;

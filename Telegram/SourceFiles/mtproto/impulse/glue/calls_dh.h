@@ -11,7 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Impulse {
 
-inline constexpr auto kCallsAuthKeySize = 256;
+inline constexpr int kCallsAuthKeySize = 256;
 
 // Android isGoodPrime for the calls prime and generator.
 [[nodiscard]] bool IsGoodCallsPrime(bytes::const_span prime, int g);

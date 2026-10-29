@@ -49,7 +49,7 @@ struct DecodedMute final {
 			outer.skip();
 			continue;
 		}
-		const auto payload = outer.readBytes();
+		const std::span<const std::uint8_t> payload = outer.readBytes();
 		Impulse::ProtoReader inner(payload);
 		while (inner.next()) {
 			if (inner.field() == kTrackHandleField) {

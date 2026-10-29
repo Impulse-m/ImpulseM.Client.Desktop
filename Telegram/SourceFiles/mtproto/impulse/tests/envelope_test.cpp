@@ -16,7 +16,7 @@ const std::vector<std::uint8_t> kBodyBytes = { 0x08, 0x01 };
 } // namespace
 
 IMPULSE_TEST(EnvelopeNumberedFrame) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"({"type":2,"pts":10,"ptsCount":1,"date":1700000000,"data":"CAE="})");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::Numbered);
 	IMPULSE_CHECK(envelope.type == 2);
@@ -27,7 +27,7 @@ IMPULSE_TEST(EnvelopeNumberedFrame) {
 }
 
 IMPULSE_TEST(EnvelopePtsLessWhenNoPtsMembers) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"({"type":3,"date":5,"data":"CAE"})");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::PtsLess);
 	IMPULSE_CHECK(envelope.type == 3);
@@ -38,7 +38,7 @@ IMPULSE_TEST(EnvelopePtsLessWhenNoPtsMembers) {
 }
 
 IMPULSE_TEST(EnvelopeUnnumberedWhenPtsAndCountAreZero) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"({"type":3,"pts":0,"ptsCount":0,"date":5,"data":"CAE="})");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::Unnumbered);
 	IMPULSE_CHECK(envelope.pts == 0);
@@ -47,14 +47,14 @@ IMPULSE_TEST(EnvelopeUnnumberedWhenPtsAndCountAreZero) {
 }
 
 IMPULSE_TEST(EnvelopeNumberedKeepsExactInt64Pts) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"({"type":2,"pts":9007199254740993,"ptsCount":1,"date":7,"data":"CAE="})");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::Numbered);
 	IMPULSE_CHECK(envelope.pts == 9007199254740993LL);
 }
 
 IMPULSE_TEST(EnvelopeMissingPtsCountReadsAsZero) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"({"type":2,"pts":4,"date":7,"data":"CAE="})");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::Numbered);
 	IMPULSE_CHECK(envelope.pts == 4);
@@ -62,7 +62,7 @@ IMPULSE_TEST(EnvelopeMissingPtsCountReadsAsZero) {
 }
 
 IMPULSE_TEST(EnvelopeUpdatesTooLongByType) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"({"type":221,"date":9,"data":"CAE="})");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::UpdatesTooLong);
 	IMPULSE_CHECK(envelope.type == Impulse::kUpdatesTooLongType);
@@ -72,7 +72,7 @@ IMPULSE_TEST(EnvelopeUpdatesTooLongByType) {
 }
 
 IMPULSE_TEST(EnvelopeLegacySessionRevokedArray) {
-	const auto envelope = ParseEnvelope(
+	const Envelope envelope = ParseEnvelope(
 		R"([{"event_type":"session_revoked","reason":"banned","api_id":4,"session_hash":12}])");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::LegacySessionRevoked);
 	IMPULSE_CHECK(envelope.updatesProto.empty());
@@ -80,13 +80,13 @@ IMPULSE_TEST(EnvelopeLegacySessionRevokedArray) {
 }
 
 IMPULSE_TEST(EnvelopeEmptyLegacyArrayIsUndecodable) {
-	const auto envelope = ParseEnvelope("[]");
+	const Envelope envelope = ParseEnvelope("[]");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::Undecodable);
 	IMPULSE_CHECK(!envelope.decodable());
 }
 
 IMPULSE_TEST(EnvelopeLegacyArrayWithNonObjectIsUndecodable) {
-	const auto envelope = ParseEnvelope(R"([{"reason":"x"}, 5])");
+	const Envelope envelope = ParseEnvelope(R"([{"reason":"x"}, 5])");
 	IMPULSE_CHECK(envelope.kind == Envelope::Kind::Undecodable);
 }
 
@@ -116,13 +116,13 @@ IMPULSE_TEST(EnvelopeNonBase64DataIsUndecodable) {
 }
 
 IMPULSE_TEST(EnvelopeBase64UrlAlphabetAndWhitespace) {
-	const auto urlSafe = ParseEnvelope(
+	const Envelope urlSafe = ParseEnvelope(
 		R"({"type":3,"date":5,"data":"CgD_"})");
 	const std::vector<std::uint8_t> expected = { 0x0a, 0x00, 0xff };
 	IMPULSE_CHECK(urlSafe.kind == Envelope::Kind::PtsLess);
 	IMPULSE_CHECK(urlSafe.updatesProto == expected);
 
-	const auto spaced = ParseEnvelope(
+	const Envelope spaced = ParseEnvelope(
 		R"({"type":3,"date":5,"data":"C A\nE="})");
 	IMPULSE_CHECK(spaced.kind == Envelope::Kind::PtsLess);
 	IMPULSE_CHECK(spaced.updatesProto == kBodyBytes);
@@ -145,13 +145,13 @@ IMPULSE_TEST(EnvelopeNonIntegerOrOutOfRangeNumbersAreUndecodable) {
 }
 
 IMPULSE_TEST(EnvelopeFactoriesSetFields) {
-	const auto numbered = Envelope::Numbered(2, 33, 3, 44, kBodyBytes);
+	const Envelope numbered = Envelope::Numbered(2, 33, 3, 44, kBodyBytes);
 	IMPULSE_CHECK(numbered.kind == Envelope::Kind::Numbered);
 	IMPULSE_CHECK(numbered.pts == 33);
 	IMPULSE_CHECK(numbered.ptsCount == 3);
 	IMPULSE_CHECK(numbered.date == 44);
 
-	const auto tooLong = Envelope::UpdatesTooLong(55, kBodyBytes);
+	const Envelope tooLong = Envelope::UpdatesTooLong(55, kBodyBytes);
 	IMPULSE_CHECK(tooLong.kind == Envelope::Kind::UpdatesTooLong);
 	IMPULSE_CHECK(tooLong.type == Impulse::kUpdatesTooLongType);
 	IMPULSE_CHECK(tooLong.date == 55);

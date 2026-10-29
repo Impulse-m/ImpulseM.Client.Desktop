@@ -51,7 +51,7 @@ IMPULSE_TEST(ProxyRoutingSelectProxyGivesLoopbackWithCredentials) {
 	using Impulse::ProxyRouting::Runtime;
 	using Impulse::ProxyRouting::SelectEndpoint;
 	const std::optional<Runtime> runtime = Runtime{ 10808, "user", "secret" };
-	const auto endpoint = SelectEndpoint(Route::Proxy, runtime);
+	const std::optional<Impulse::ProxyRouting::HttpEndpoint> endpoint = SelectEndpoint(Route::Proxy, runtime);
 	IMPULSE_CHECK(endpoint.has_value());
 	IMPULSE_CHECK(endpoint->host == "127.0.0.1");
 	IMPULSE_CHECK(endpoint->port == 10808);
@@ -63,7 +63,7 @@ IMPULSE_TEST(ProxyRoutingSelectProxyGivesLoopbackWithCredentials) {
 IMPULSE_TEST(ProxyRoutingSelectProxyWithoutRuntimeIsBlackhole) {
 	using Impulse::ProxyRouting::Route;
 	using Impulse::ProxyRouting::SelectEndpoint;
-	const auto endpoint = SelectEndpoint(Route::Proxy, std::nullopt);
+	const std::optional<Impulse::ProxyRouting::HttpEndpoint> endpoint = SelectEndpoint(Route::Proxy, std::nullopt);
 	IMPULSE_CHECK(endpoint.has_value());
 	IMPULSE_CHECK(endpoint->host == "127.0.0.1");
 	IMPULSE_CHECK(endpoint->port == 9);
@@ -75,7 +75,7 @@ IMPULSE_TEST(ProxyRoutingSelectBlockedIsBlackhole) {
 	using Impulse::ProxyRouting::Runtime;
 	using Impulse::ProxyRouting::SelectEndpoint;
 	const std::optional<Runtime> runtime = Runtime{ 10808, "user", "secret" };
-	const auto endpoint = SelectEndpoint(Route::Blocked, runtime);
+	const std::optional<Impulse::ProxyRouting::HttpEndpoint> endpoint = SelectEndpoint(Route::Blocked, runtime);
 	IMPULSE_CHECK(endpoint.has_value());
 	IMPULSE_CHECK(endpoint->host == "127.0.0.1");
 	IMPULSE_CHECK(endpoint->port == 9);

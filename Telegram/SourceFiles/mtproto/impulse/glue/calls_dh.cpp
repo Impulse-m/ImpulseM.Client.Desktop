@@ -16,7 +16,7 @@ namespace Impulse {
 namespace {
 
 [[nodiscard]] bytes::vector FitToKeySize(bytes::vector value) {
-	const auto size = static_cast<std::size_t>(kCallsAuthKeySize);
+	const std::size_t size = static_cast<std::size_t>(kCallsAuthKeySize);
 	if (value.size() == size) {
 		return value;
 	} else if (value.size() > size) {
@@ -25,8 +25,8 @@ namespace {
 			value.end());
 	}
 
-	auto result = bytes::vector(size, gsl::byte{});
-	const auto offset = size - value.size();
+	bytes::vector result = bytes::vector(size, gsl::byte{});
+	const std::size_t offset = size - value.size();
 	for (std::size_t index = 0; index < value.size(); ++index) {
 		result[offset + index] = value[index];
 	}
@@ -40,16 +40,16 @@ bool IsGoodCallsPrime(bytes::const_span prime, int g) {
 }
 
 bool IsGoodCallsGa(bytes::const_span ga, bytes::const_span prime) {
-	const auto value = openssl::BigNum(ga);
-	const auto modulus = openssl::BigNum(prime);
+	const openssl::BigNum value = openssl::BigNum(ga);
+	const openssl::BigNum modulus = openssl::BigNum(prime);
 	if (value.failed() || modulus.failed()) {
 		return false;
 	}
-	const auto upperBound = openssl::BigNum(modulus).subWord(1);
+	const openssl::BigNum upperBound = openssl::BigNum(modulus).subWord(1);
 	if (upperBound.failed()) {
 		return false;
 	}
-	const auto one = openssl::BigNum(1u);
+	const openssl::BigNum one = openssl::BigNum(1u);
 	return openssl::BigNum::Compare(value, one) > 0
 		&& openssl::BigNum::Compare(value, upperBound) < 0;
 }
@@ -61,7 +61,7 @@ bytes::vector CallsAuthKey(
 	if (!IsGoodCallsGa(peerValue, prime)) {
 		return {};
 	}
-	const auto result = openssl::BigNum::ModExp(
+	const openssl::BigNum result = openssl::BigNum::ModExp(
 		openssl::BigNum(peerValue),
 		openssl::BigNum(secret),
 		openssl::BigNum(prime));

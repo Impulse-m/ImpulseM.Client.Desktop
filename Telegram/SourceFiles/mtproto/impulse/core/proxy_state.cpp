@@ -15,28 +15,28 @@
 namespace Impulse::ProxyState {
 namespace {
 
-inline constexpr auto kFragmentOff = std::string_view("off");
-inline constexpr auto kFragmentClassic = std::string_view("classic");
-inline constexpr auto kFragmentFinalMask = std::string_view("finalmask");
-inline constexpr auto kFragmentTlsHello = std::string_view("tlshello");
-inline constexpr auto kFragmentDefaultLength = std::string_view("100-200");
-inline constexpr auto kFragmentDefaultInterval = std::string_view("10-20");
+inline constexpr std::string_view kFragmentOff = std::string_view("off");
+inline constexpr std::string_view kFragmentClassic = std::string_view("classic");
+inline constexpr std::string_view kFragmentFinalMask = std::string_view("finalmask");
+inline constexpr std::string_view kFragmentTlsHello = std::string_view("tlshello");
+inline constexpr std::string_view kFragmentDefaultLength = std::string_view("100-200");
+inline constexpr std::string_view kFragmentDefaultInterval = std::string_view("10-20");
 
-inline constexpr auto kDnsSystem = std::string_view("system");
-inline constexpr auto kDnsCloudflare = std::string_view("cloudflare");
-inline constexpr auto kDnsGoogle = std::string_view("google");
-inline constexpr auto kDnsCustom = std::string_view("custom");
+inline constexpr std::string_view kDnsSystem = std::string_view("system");
+inline constexpr std::string_view kDnsCloudflare = std::string_view("cloudflare");
+inline constexpr std::string_view kDnsGoogle = std::string_view("google");
+inline constexpr std::string_view kDnsCustom = std::string_view("custom");
 
-inline constexpr auto kPingBatch = std::string_view("batch");
-inline constexpr auto kPingSequential = std::string_view("sequential");
-inline constexpr auto kPingDefaultUrl = std::string_view("https://www.gstatic.com/generate_204");
-inline constexpr auto kHttpsPrefix = std::string_view("https://");
+inline constexpr std::string_view kPingBatch = std::string_view("batch");
+inline constexpr std::string_view kPingSequential = std::string_view("sequential");
+inline constexpr std::string_view kPingDefaultUrl = std::string_view("https://www.gstatic.com/generate_204");
+inline constexpr std::string_view kHttpsPrefix = std::string_view("https://");
 
 inline constexpr int kDefaultMuxConcurrency = 8;
 inline constexpr int kDefaultPingTimeoutSeconds = 5;
 inline constexpr int kDefaultIntervalHours = 24;
 
-inline constexpr auto kFingerprints = std::array<std::string_view, 10>{
+inline constexpr std::array<std::string_view, 10> kFingerprints = std::array<std::string_view, 10>{
 	"chrome",
 	"firefox",
 	"safari",
@@ -50,7 +50,7 @@ inline constexpr auto kFingerprints = std::array<std::string_view, 10>{
 };
 
 [[nodiscard]] bool IsFingerprint(std::string_view value) {
-	for (const auto candidate : kFingerprints) {
+	for (const std::string_view candidate : kFingerprints) {
 		if (candidate == value) {
 			return true;
 		}
@@ -63,7 +63,7 @@ inline constexpr auto kFingerprints = std::array<std::string_view, 10>{
 	if (text.empty() || text.size() > 5) {
 		return -1;
 	}
-	auto value = 0;
+	int value = 0;
 	for (const char symbol : text) {
 		if (symbol < '0' || symbol > '9') {
 			return -1;
@@ -75,12 +75,12 @@ inline constexpr auto kFingerprints = std::array<std::string_view, 10>{
 
 // "N" or "N-M" with 0 <= N <= M <= 65535.
 [[nodiscard]] bool IsRange(std::string_view value) {
-	const auto dash = value.find('-');
+	const std::size_t dash = value.find('-');
 	if (dash == std::string_view::npos) {
 		return ParseBounded(value) >= 0;
 	}
-	const auto low = ParseBounded(value.substr(0, dash));
-	const auto high = ParseBounded(value.substr(dash + 1));
+	const int low = ParseBounded(value.substr(0, dash));
+	const int high = ParseBounded(value.substr(dash + 1));
 	return low >= 0 && high >= 0 && low <= high;
 }
 
@@ -94,9 +94,9 @@ inline constexpr auto kFingerprints = std::array<std::string_view, 10>{
 		return value.size() > kHttpsPrefix.size()
 			&& value.find(' ') == std::string_view::npos;
 	}
-	auto parts = 0;
-	auto digits = 0;
-	auto number = 0;
+	int parts = 0;
+	int digits = 0;
+	int number = 0;
 	for (std::size_t i = 0; i <= value.size(); ++i) {
 		if (i == value.size() || value[i] == '.') {
 			if (digits == 0 || digits > 3 || number > 255) {
@@ -187,11 +187,11 @@ void RepairToggles(
 [[nodiscard]] std::optional<std::string> ReadOptionalString(
 		const Json::Value &object,
 		std::string_view key) {
-	const auto *value = object.find(key);
+	const Json::Value *value = object.find(key);
 	if (value == nullptr) {
 		return std::nullopt;
 	}
-	if (const auto *text = value->asString()) {
+	if (const std::string *text = value->asString()) {
 		return *text;
 	}
 	return std::nullopt;
@@ -201,7 +201,7 @@ void RepairToggles(
 		const Json::Value &object,
 		std::string_view key,
 		std::string fallback) {
-	auto value = ReadOptionalString(object, key);
+	std::optional<std::string> value = ReadOptionalString(object, key);
 	return value ? std::move(*value) : std::move(fallback);
 }
 
@@ -209,11 +209,11 @@ void RepairToggles(
 		const Json::Value &object,
 		std::string_view key,
 		bool fallback) {
-	const auto *value = object.find(key);
+	const Json::Value *value = object.find(key);
 	if (value == nullptr) {
 		return fallback;
 	}
-	const auto flag = value->asBool();
+	const std::optional<bool> flag = value->asBool();
 	return flag ? *flag : fallback;
 }
 
@@ -221,11 +221,11 @@ void RepairToggles(
 		const Json::Value &object,
 		std::string_view key,
 		std::int64_t fallback) {
-	const auto *value = object.find(key);
+	const Json::Value *value = object.find(key);
 	if (value == nullptr) {
 		return fallback;
 	}
-	const auto number = value->asInt();
+	const std::optional<std::int64_t> number = value->asInt();
 	return number ? *number : fallback;
 }
 
@@ -233,7 +233,7 @@ void RepairToggles(
 		const Json::Value &object,
 		std::string_view key,
 		int fallback) {
-	const auto number = ReadInt64(object, key, fallback);
+	const std::int64_t number = ReadInt64(object, key, fallback);
 	if (number < std::numeric_limits<int>::min()
 		|| number > std::numeric_limits<int>::max()) {
 		return fallback;
@@ -244,7 +244,7 @@ void RepairToggles(
 [[nodiscard]] const std::vector<Json::Value> *ReadArray(
 		const Json::Value &object,
 		std::string_view key) {
-	const auto *value = object.find(key);
+	const Json::Value *value = object.find(key);
 	return value == nullptr ? nullptr : value->asArray();
 }
 
@@ -252,14 +252,14 @@ void RepairToggles(
 	if (item.kind() != Json::Kind::Object) {
 		return std::nullopt;
 	}
-	const auto id = ReadOptionalString(item, "id");
-	const auto name = ReadOptionalString(item, "name");
-	const auto host = ReadOptionalString(item, "host");
-	const auto network = ReadOptionalString(item, "network");
-	const auto security = ReadOptionalString(item, "security");
-	const auto outbound = ReadOptionalString(item, "outbound");
-	auto port = std::optional<std::int64_t>();
-	if (const auto *portValue = item.find("port")) {
+	const std::optional<std::string> id = ReadOptionalString(item, "id");
+	const std::optional<std::string> name = ReadOptionalString(item, "name");
+	const std::optional<std::string> host = ReadOptionalString(item, "host");
+	const std::optional<std::string> network = ReadOptionalString(item, "network");
+	const std::optional<std::string> security = ReadOptionalString(item, "security");
+	const std::optional<std::string> outbound = ReadOptionalString(item, "outbound");
+	std::optional<std::int64_t> port = std::optional<std::int64_t>();
+	if (const Json::Value *portValue = item.find("port")) {
 		port = portValue->asInt();
 	}
 	if (!id || !name || !host || !network || !security || !outbound || !port) {
@@ -268,7 +268,7 @@ void RepairToggles(
 	if (*port < std::numeric_limits<int>::min() || *port > std::numeric_limits<int>::max()) {
 		return std::nullopt;
 	}
-	auto server = Server();
+	Server server = Server();
 	server.id = *id;
 	server.name = *name;
 	server.host = *host;
@@ -281,12 +281,12 @@ void RepairToggles(
 }
 
 [[nodiscard]] std::vector<Server> DecodeServers(const std::vector<Json::Value> *array) {
-	auto servers = std::vector<Server>();
+	std::vector<Server> servers = std::vector<Server>();
 	if (array == nullptr) {
 		return servers;
 	}
-	for (const auto &element : *array) {
-		if (auto server = DecodeServer(element)) {
+	for (const Json::Value &element : *array) {
+		if (std::optional<Server> server = DecodeServer(element)) {
 			servers.push_back(std::move(*server));
 		}
 	}
@@ -294,7 +294,7 @@ void RepairToggles(
 }
 
 [[nodiscard]] SubscriptionMeta DecodeMeta(const Json::Value *element) {
-	auto meta = SubscriptionMeta();
+	SubscriptionMeta meta = SubscriptionMeta();
 	if (element == nullptr || element->kind() != Json::Kind::Object) {
 		return meta;
 	}
@@ -311,12 +311,12 @@ void RepairToggles(
 	if (item.kind() != Json::Kind::Object) {
 		return std::nullopt;
 	}
-	const auto id = ReadOptionalString(item, "id");
-	const auto url = ReadOptionalString(item, "url");
+	const std::optional<std::string> id = ReadOptionalString(item, "id");
+	const std::optional<std::string> url = ReadOptionalString(item, "url");
 	if (!id || !url) {
 		return std::nullopt;
 	}
-	auto subscription = Subscription();
+	Subscription subscription = Subscription();
 	subscription.id = *id;
 	subscription.url = *url;
 	subscription.meta = DecodeMeta(item.find("meta"));
@@ -328,7 +328,7 @@ void RepairToggles(
 }
 
 [[nodiscard]] Advanced DecodeAdvanced(const Json::Value *element) {
-	auto advanced = Advanced();
+	Advanced advanced = Advanced();
 	if (element != nullptr && element->kind() == Json::Kind::Object) {
 		advanced.fragmentMode = ReadString(*element, "fragmentMode", advanced.fragmentMode);
 		advanced.fragmentPackets = ReadString(*element, "fragmentPackets", advanced.fragmentPackets);
@@ -357,10 +357,10 @@ void RepairToggles(
 // Writing helpers. Each returns a complete JSON fragment.
 
 [[nodiscard]] std::string Quoted(std::string_view text) {
-	constexpr auto hex = std::string_view("0123456789abcdef");
-	auto out = std::string("\"");
+	constexpr std::string_view hex = std::string_view("0123456789abcdef");
+	std::string out = std::string("\"");
 	for (const char symbol : text) {
-		const auto code = static_cast<unsigned char>(symbol);
+		const unsigned char code = static_cast<unsigned char>(symbol);
 		if (symbol == '"') {
 			out += "\\\"";
 		} else if (symbol == '\\') {
@@ -393,8 +393,8 @@ void RepairToggles(
 		char open,
 		char close,
 		const std::vector<std::string> &items) {
-	auto out = std::string(1, open);
-	for (auto i = std::size_t(0); i < items.size(); ++i) {
+	std::string out = std::string(1, open);
+	for (std::size_t i = std::size_t(0); i < items.size(); ++i) {
 		if (i > 0) {
 			out += ',';
 		}
@@ -409,7 +409,7 @@ void RepairToggles(
 }
 
 [[nodiscard]] std::string EncodeServer(const Server &server) {
-	auto members = std::vector<std::string>{
+	std::vector<std::string> members = std::vector<std::string>{
 		Member("id", Quoted(server.id)),
 		Member("name", Quoted(server.name)),
 		Member("host", Quoted(server.host)),
@@ -425,16 +425,16 @@ void RepairToggles(
 }
 
 [[nodiscard]] std::string EncodeServers(const std::vector<Server> &servers) {
-	auto items = std::vector<std::string>();
+	std::vector<std::string> items = std::vector<std::string>();
 	items.reserve(servers.size());
-	for (const auto &server : servers) {
+	for (const Server &server : servers) {
 		items.push_back(EncodeServer(server));
 	}
 	return Container('[', ']', items);
 }
 
 [[nodiscard]] std::string EncodeMeta(const SubscriptionMeta &meta) {
-	auto members = std::vector<std::string>();
+	std::vector<std::string> members = std::vector<std::string>();
 	if (meta.title) {
 		members.push_back(Member("title", Quoted(*meta.title)));
 	}
@@ -447,7 +447,7 @@ void RepairToggles(
 }
 
 [[nodiscard]] std::string EncodeSubscription(const Subscription &subscription) {
-	auto members = std::vector<std::string>{
+	std::vector<std::string> members = std::vector<std::string>{
 		Member("id", Quoted(subscription.id)),
 		Member("url", Quoted(subscription.url)),
 		Member("updatedAt", std::to_string(subscription.updatedAt)),
@@ -462,7 +462,7 @@ void RepairToggles(
 }
 
 [[nodiscard]] std::string EncodeAdvanced(const Advanced &advanced) {
-	auto members = std::vector<std::string>{
+	std::vector<std::string> members = std::vector<std::string>{
 		Member("fragmentMode", Quoted(advanced.fragmentMode)),
 		Member("fragmentPackets", Quoted(advanced.fragmentPackets)),
 		Member("fragmentLength", Quoted(advanced.fragmentLength)),
@@ -489,8 +489,8 @@ void RepairToggles(
 } // namespace
 
 std::string CoreKey(const Advanced &advanced) {
-	auto core = advanced;
-	const auto defaults = Advanced();
+	Advanced core = advanced;
+	const Advanced defaults = Advanced();
 	core.pingMode = defaults.pingMode;
 	core.pingPauseMillis = defaults.pingPauseMillis;
 	core.pingTimeoutSeconds = defaults.pingTimeoutSeconds;
@@ -500,11 +500,11 @@ std::string CoreKey(const Advanced &advanced) {
 }
 
 std::string Encode(const State &state) {
-	auto useForTransport = state.useForTransport;
-	auto useForCalls = state.useForCalls;
+	bool useForTransport = state.useForTransport;
+	bool useForCalls = state.useForCalls;
 	RepairToggles(useForTransport, useForCalls);
 
-	auto members = std::vector<std::string>{
+	std::vector<std::string> members = std::vector<std::string>{
 		Member("v", std::to_string(kVersion)),
 		Member("enabled", Boolean(state.enabled)),
 		Member("useForTransport", Boolean(useForTransport)),
@@ -515,9 +515,9 @@ std::string Encode(const State &state) {
 	}
 	members.push_back(Member("manual", EncodeServers(state.manual)));
 
-	auto subscriptions = std::vector<std::string>();
+	std::vector<std::string> subscriptions = std::vector<std::string>();
 	subscriptions.reserve(state.subscriptions.size());
-	for (const auto &subscription : state.subscriptions) {
+	for (const Subscription &subscription : state.subscriptions) {
 		subscriptions.push_back(EncodeSubscription(subscription));
 	}
 	members.push_back(Member("subscriptions", Container('[', ']', subscriptions)));
@@ -526,13 +526,13 @@ std::string Encode(const State &state) {
 }
 
 State Decode(std::string_view text) {
-	const auto parsed = Json::parse(text);
+	const Json::ParseResult parsed = Json::parse(text);
 	if (!parsed.value || parsed.value->kind() != Json::Kind::Object) {
 		return State();
 	}
-	const auto &root = *parsed.value;
+	const Json::Value &root = *parsed.value;
 
-	auto state = State();
+	State state = State();
 	state.enabled = ReadBool(root, "enabled", state.enabled);
 	state.useForTransport = ReadBool(root, "useForTransport", state.useForTransport);
 	state.useForCalls = ReadBool(root, "useForCalls", state.useForCalls);
@@ -540,9 +540,9 @@ State Decode(std::string_view text) {
 	state.selectedId = ReadOptionalString(root, "selectedId");
 	state.manual = DecodeServers(ReadArray(root, "manual"));
 
-	if (const auto *subscriptions = ReadArray(root, "subscriptions")) {
-		for (const auto &element : *subscriptions) {
-			if (auto subscription = DecodeSubscription(element)) {
+	if (const std::vector<Json::Value> *subscriptions = ReadArray(root, "subscriptions")) {
+		for (const Json::Value &element : *subscriptions) {
+			if (std::optional<Subscription> subscription = DecodeSubscription(element)) {
 				state.subscriptions.push_back(std::move(*subscription));
 			}
 		}

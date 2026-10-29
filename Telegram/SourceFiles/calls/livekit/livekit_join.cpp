@@ -18,7 +18,7 @@ std::optional<LiveKit::JoinParameters> ReadOneToOneJoin(
 	if (!call.vcustom_parameters().has_value()) {
 		return std::nullopt;
 	}
-	const auto &json = call.vcustom_parameters()->c_dataJSON().vdata().v;
+	const QByteArray &json = call.vcustom_parameters()->c_dataJSON().vdata().v;
 	return LiveKit::ParseOneToOneJoin(
 		std::string_view(json.constData(), size_t(json.size())),
 		int64(call.vid().v));

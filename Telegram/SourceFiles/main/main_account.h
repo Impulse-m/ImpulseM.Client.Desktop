@@ -29,6 +29,13 @@ class Session;
 class SessionSettings;
 class AppConfig;
 
+// ImpulseM session tokens of the signed-in account (Android SessionTokens).
+struct ImpulseSessionTokens {
+	QByteArray accessToken;
+	QByteArray refreshToken;
+	quint64 userId = 0;
+};
+
 class Account final : public base::has_weak_ptr {
 public:
 	Account(not_null<Domain*> domain, const QString &dataName, int index);
@@ -108,6 +115,16 @@ public:
 	[[nodiscard]] QByteArray serializeMtpAuthorization() const;
 	void setMtpAuthorization(const QByteArray &serialized);
 
+	// ImpulseM tokens are stored as a trailing section of the MTP
+	// authorization blob. Setters only change memory, the caller persists
+	// them with local().writeMtpData().
+	[[nodiscard]] const ImpulseSessionTokens &impulseSessionTokens() const;
+	void setImpulseSessionTokens(ImpulseSessionTokens tokens);
+	[[nodiscard]] QByteArray impulseIdentityToken() const;
+	void setImpulseIdentityToken(QByteArray token);
+	// Logged in means a stored user id and a non-empty access token.
+	[[nodiscard]] bool impulseLoggedIn() const;
+
 	void suggestMainDcId(MTP::DcId mainDcId);
 	void destroyStaleAuthorizationKeys();
 
@@ -164,6 +181,8 @@ private:
 	std::unique_ptr<SessionSettings> _storedSessionSettings;
 	MTP::Instance::Fields _mtpFields;
 	MTP::AuthKeysList _mtpKeysToDestroy;
+	ImpulseSessionTokens impulseSession;
+	QByteArray impulseIdentity;
 	bool _loggingOut = false;
 	bool _destroyingSession = false;
 

@@ -33,6 +33,9 @@ namespace {
 
 constexpr auto kWideIdsTag = ~uint64(0);
 
+// Marks the trailing ImpulseM section of the MTP authorization blob.
+constexpr auto kImpulseSectionTag = quint32(0x494D5031); // "IMP1"
+
 // Transport-layer decision: stale auth keys are not handed to a
 // KeysDestroyer instance. Kept in the code, switched off.
 constexpr auto kKeysDestroyerEnabled = false;
@@ -212,6 +215,11 @@ void Account::destroySession(DestroyReason reason) {
 	_storedSessionSettings.reset();
 	_sessionUserId = 0;
 	_sessionUserSerialized = {};
+	if (reason == DestroyReason::LoggedOut) {
+		// Sign-out discards the session tokens and the identity.
+		impulseSession = {};
+		impulseIdentity = {};
+	}
 	if (!sessionExists()) {
 		return;
 	}
@@ -292,7 +300,9 @@ QByteArray Account::serializeMtpAuthorization() const {
 	const auto serialize = [&](
 			MTP::DcId mainDcId,
 			const MTP::AuthKeysList &keys,
-			const MTP::AuthKeysList &keysToDestroy) {
+			const MTP::AuthKeysList &keysToDestroy,
+			const ImpulseSessionTokens &tokens,
+			const QByteArray &identity) {
 		const auto keysSize = [](auto &list) {
 			const auto keyDataSize = MTP::AuthKey::Data().size();
 			return sizeof(qint32)
@@ -326,6 +336,12 @@ QByteArray Account::serializeMtpAuthorization() const {
 				<< qint32(mainDcId);
 			writeKeys(stream, keys);
 			writeKeys(stream, keysToDestroy);
+			stream
+				<< quint32(kImpulseSectionTag)
+				<< tokens.accessToken
+				<< tokens.refreshToken
+				<< quint64(tokens.userId)
+				<< identity;
 
 			DEBUG_LOG(("MTP Info: Keys written, userId: %1, dcId: %2"
 				).arg(currentUserId.bare
@@ -338,11 +354,21 @@ QByteArray Account::serializeMtpAuthorization() const {
 		const auto keysToDestroy = _mtpForKeysDestroy
 			? _mtpForKeysDestroy->getKeysForWrite()
 			: MTP::AuthKeysList();
-		return serialize(_mtp->mainDcId(), keys, keysToDestroy);
+		return serialize(
+			_mtp->mainDcId(),
+			keys,
+			keysToDestroy,
+			impulseSession,
+			impulseIdentity);
 	}
 	const auto &keys = _mtpFields.keys;
 	const auto &keysToDestroy = _mtpKeysToDestroy;
-	return serialize(_mtpFields.mainDcId, keys, keysToDestroy);
+	return serialize(
+		_mtpFields.mainDcId,
+		keys,
+		keysToDestroy,
+		impulseSession,
+		impulseIdentity);
 }
 
 void Account::setSessionUserId(UserId userId) {
@@ -428,6 +454,44 @@ void Account::setMtpAuthorization(const QByteArray &serialized) {
 		"read keys, current: %1, to destroy: %2"
 		).arg(_mtpFields.keys.size()
 		).arg(_mtpKeysToDestroy.size()));
+
+	// Blobs written before ImpulseM tokens existed end after the keys.
+	if (!stream.atEnd()
+		&& Serialize::read<quint32>(stream) == kImpulseSectionTag) {
+		auto tokens = ImpulseSessionTokens();
+		tokens.accessToken = Serialize::read<QByteArray>(stream);
+		tokens.refreshToken = Serialize::read<QByteArray>(stream);
+		tokens.userId = Serialize::read<quint64>(stream);
+		auto identity = Serialize::read<QByteArray>(stream);
+		if (stream.status() == QDataStream::Ok) {
+			impulseSession = std::move(tokens);
+			impulseIdentity = std::move(identity);
+		} else {
+			LOG(("MTP Error: "
+				"Could not read ImpulseM section from mtp authorization."));
+		}
+	}
+}
+
+const ImpulseSessionTokens &Account::impulseSessionTokens() const {
+	return impulseSession;
+}
+
+void Account::setImpulseSessionTokens(ImpulseSessionTokens tokens) {
+	impulseSession = std::move(tokens);
+}
+
+QByteArray Account::impulseIdentityToken() const {
+	return impulseIdentity;
+}
+
+void Account::setImpulseIdentityToken(QByteArray token) {
+	impulseIdentity = std::move(token);
+}
+
+bool Account::impulseLoggedIn() const {
+	return (impulseSession.userId != 0)
+		&& !impulseSession.accessToken.isEmpty();
 }
 
 void Account::startMtp(std::unique_ptr<MTP::Config> config) {
@@ -495,7 +559,7 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 		destroyMtpKeys(base::take(_mtpKeysToDestroy));
 	}
 
-	if (_sessionUserId) {
+	if (_sessionUserId && impulseLoggedIn()) {
 		createSession(
 			_sessionUserId,
 			base::take(_sessionUserSerialized),

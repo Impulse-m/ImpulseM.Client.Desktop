@@ -346,7 +346,7 @@ inline constexpr auto kTextDiffInsertedColorIndex = 10;
 inline constexpr auto kTextDiffDeletedColorIndex = 11;
 
 [[nodiscard]] inline QString RichExportGeneratorMarker() {
-	return u"Telegram Desktop rich message export"_q;
+	return u"ImpulseM Desktop rich message export"_q;
 }
 
 [[nodiscard]] RichMessageLimits ResolveRichMessageLimits(

@@ -1597,7 +1597,7 @@ not_null<Reaction*> Reactions::lookupPaid() {
 		const auto select = generate(u"star_reaction_select"_q);
 		_paid.emplace(Reaction{
 			.id = ReactionId::Paid(),
-			.title = u"Telegram Star"_q,
+			.title = u"ImpulseM Star"_q,
 			.appearAnimation = appear,
 			.selectAnimation = select,
 			.centerIcon = center,

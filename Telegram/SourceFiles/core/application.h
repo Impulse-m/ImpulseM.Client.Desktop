@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "mtproto/impulse/core/proxy_routing.h"
 #include "mtproto/mtproto_auth_key.h"
 #include "mtproto/mtproto_proxy_data.h"
 #include "window/window_separate_id.h"
@@ -342,6 +343,8 @@ public:
 	// Sandbox interface.
 	void postponeCall(FnMut<void()> &&callable);
 	void refreshGlobalProxy();
+	[[nodiscard]] std::optional<Impulse::ProxyRouting::HttpEndpoint>
+		impulseHttpEndpoint();
 	void refreshApplicationIcon();
 
 	void quitPreventFinished();

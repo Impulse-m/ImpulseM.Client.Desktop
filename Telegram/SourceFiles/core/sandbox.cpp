@@ -686,6 +686,18 @@ void Sandbox::checkForQuit() {
 }
 
 void Sandbox::refreshGlobalProxy() {
+	if (Core::IsAppLaunched()) {
+		const auto endpoint = Core::App().impulseHttpEndpoint();
+		if (endpoint) {
+			QNetworkProxy::setApplicationProxy(QNetworkProxy(
+				QNetworkProxy::HttpProxy,
+				QString::fromStdString(endpoint->host),
+				static_cast<quint16>(endpoint->port),
+				QString::fromStdString(endpoint->user),
+				QString::fromStdString(endpoint->password)));
+			return;
+		}
+	}
 	const auto proxy = !Core::IsAppLaunched()
 		? _sandboxProxy
 		: Core::App().settings().proxy().isEnabled()

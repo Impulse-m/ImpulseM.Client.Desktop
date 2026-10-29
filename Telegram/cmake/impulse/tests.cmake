@@ -23,3 +23,25 @@ target_link_libraries(impulse_tests
 PRIVATE
     desktop-app::external_zlib
 )
+
+# Manual live check of the Rust Centrifugo client. It dials the network and
+# links the Rust archive, so it is off by default.
+option(IMPULSE_CENTRIFUGO_SMOKE "Compile the live Centrifugo client smoke test into impulse_tests" OFF)
+
+if (IMPULSE_CENTRIFUGO_SMOKE)
+    target_compile_definitions(impulse_tests
+    PRIVATE
+        IMPULSE_CENTRIFUGO_SMOKE
+    )
+
+    nice_target_sources(impulse_tests ${src_loc}
+    PRIVATE
+        mtproto/impulse/glue/centrifugo_rust.cpp
+        mtproto/impulse/tests/manual/centrifugo_rust_smoke.cpp
+    )
+
+    target_link_libraries(impulse_tests
+    PRIVATE
+        desktop-app::external_tdesktop_rust
+    )
+endif()

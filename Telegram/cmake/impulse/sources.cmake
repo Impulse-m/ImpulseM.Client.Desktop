@@ -18,6 +18,7 @@ file(GLOB impulse_calls_sources
     RELATIVE ${src_loc}
     CONFIGURE_DEPENDS
     ${src_loc}/calls/livekit/*.cpp
+    ${src_loc}/calls/group/livekit_*.cpp
 )
 
 file(GLOB impulse_proxy_sources

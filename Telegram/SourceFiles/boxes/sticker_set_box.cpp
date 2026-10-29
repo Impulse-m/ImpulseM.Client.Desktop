@@ -994,8 +994,9 @@ void StickerSetBox::updateButtons() {
 						Ui::Text::Colorized(tr::bold(u"@stickers"_q)),
 						Ui::Text::RichLangValue));
 				item->clicks(
-				) | rpl::on_next([] {
-					UrlClickHandler::Open(u"https://t.me/stickers"_q);
+				) | rpl::on_next([=] {
+					UrlClickHandler::Open(
+						_session->createInternalLinkFull(u"stickers"_q));
 				}, item->lifetime());
 				menu->addAction(std::move(item));
 			});

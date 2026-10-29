@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/emoji_list_widget.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
+#include "core/impulse_features.h"
 #include "core/ui_integration.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -938,7 +939,11 @@ void EditAllowedReactionsBox(
 			inner,
 			tr::lng_manage_peer_reactions_paid_about(
 				lt_link,
-				tr::lng_manage_peer_reactions_paid_link([=](QString text) {
+				tr::lng_manage_peer_reactions_paid_link([=](
+						QString text) -> TextWithEntities {
+					if (!ImpulseFeatures::STARS_AND_TON) {
+						return TextWithEntities{ .text = text };
+					}
 					return tr::link(
 						text,
 						u"https://telegram.org/tos/stars"_q);

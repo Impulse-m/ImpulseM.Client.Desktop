@@ -2318,6 +2318,7 @@ void StickersBox::Inner::AddressField::correctValue(
 		u"t.me/"_q,
 		u"telegram.me/"_q,
 		u"telegram.dog/"_q,
+		u"o.impulsem.net/"_q,
 		u"addstickers/"_q,
 	};
 	for (const auto &removePhrase : removeFromBeginning) {

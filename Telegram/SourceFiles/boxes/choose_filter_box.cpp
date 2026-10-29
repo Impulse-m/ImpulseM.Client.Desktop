@@ -522,10 +522,11 @@ History *HistoryFromMimeData(
 	}
 	if (mime->hasText()) {
 		auto text = mime->text().trimmed();
+		const QString linkPrefix = session->createInternalLinkFull(QString());
 		if (text.startsWith('@')) {
 			text = text.mid(1);
-		} else if (text.startsWith(u"https://t.me/"_q)) {
-			text = text.mid(13);
+		} else if (text.startsWith(linkPrefix)) {
+			text = text.mid(linkPrefix.size());
 		} else {
 			return nullptr;
 		}

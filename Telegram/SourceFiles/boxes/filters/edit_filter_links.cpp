@@ -271,6 +271,12 @@ QString LinkRow::generateName() {
 	).replace(
 		u"t.me/joinchat/"_q,
 		QString()
+	).replace(
+		u"o.impulsem.net/+"_q,
+		QString()
+	).replace(
+		u"o.impulsem.net/joinchat/"_q,
+		QString()
 	);
 }
 

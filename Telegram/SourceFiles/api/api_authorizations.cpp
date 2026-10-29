@@ -20,10 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Api {
 namespace {
 
-constexpr auto TestApiId = 17349;
-constexpr auto SnapApiId = 611335;
-constexpr auto DesktopApiId = 2040;
-
 Authorizations::Entry ParseEntry(const MTPDauthorization &data) {
 	auto result = Authorizations::Entry();
 
@@ -32,13 +28,10 @@ Authorizations::Entry ParseEntry(const MTPDauthorization &data) {
 	result.callsDisabled = data.is_call_requests_disabled();
 
 	const auto apiId = result.apiId = data.vapi_id().v;
-	const auto isTest = (apiId == TestApiId);
-	const auto isDesktop = (apiId == DesktopApiId)
-		|| (apiId == SnapApiId)
-		|| isTest;
+	const auto isDesktop = (apiId == ApiId);
 
 	const auto appName = isDesktop
-		? u"Telegram Desktop%1"_q.arg(isTest ? " (GitHub)" : QString())
+		? u"ImpulseM Desktop"_q
 		: qs(data.vapp_name());// + u" for "_q + qs(d.vplatform());
 	const auto appVer = [&] {
 		const auto version = qs(data.vapp_version());

@@ -47,6 +47,8 @@ namespace Calls {
 namespace {
 
 constexpr auto kMinLayer = 65;
+constexpr auto kMaxLayer = 92;
+constexpr auto kLiveKitLibraryVersion = "impulsem-livekit-1";
 constexpr auto kHangupTimeoutMs = 5000;
 constexpr auto kSha256Size = 32;
 constexpr auto kAuthKeySize = 256;
@@ -182,17 +184,8 @@ uint64 ComputeFingerprint(bytes::const_span authKey) {
 		| (gsl::to_integer<uint64>(hash[12]));
 }
 
-[[nodiscard]] QVector<MTPstring> WrapVersions(
-		const std::vector<std::string> &data) {
-	return ranges::views::all(
-		data
-	) | ranges::views::transform([=](const std::string &string) {
-		return MTP_string(string);
-	}) | ranges::to<QVector<MTPstring>>;
-}
-
 [[nodiscard]] QVector<MTPstring> CollectVersionsForApi() {
-	return WrapVersions(tgcalls::Meta::Versions() | ranges::actions::reverse);
+	return QVector<MTPstring>{ MTP_string(kLiveKitLibraryVersion) };
 }
 
 [[nodiscard]] Webrtc::VideoState StartVideoState(bool enabled) {
@@ -356,7 +349,7 @@ void Call::startOutgoing() {
 			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
 				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
 			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
+			MTP_int(kMaxLayer),
 			MTP_vector(CollectVersionsForApi()))
 	)).done([=](const MTPphone_PhoneCall &result) {
 		Expects(result.type() == mtpc_phone_phoneCall);
@@ -490,7 +483,7 @@ void Call::actuallyAnswer() {
 			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
 				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
 			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
+			MTP_int(kMaxLayer),
 			MTP_vector(CollectVersionsForApi()))
 	)).done([=](const MTPphone_PhoneCall &result) {
 		Expects(result.type() == mtpc_phone_phoneCall);
@@ -1022,7 +1015,7 @@ void Call::confirmAcceptedCall(const MTPDphoneCallAccepted &call) {
 			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
 				| MTPDphoneCallProtocol::Flag::f_udp_reflector),
 			MTP_int(kMinLayer),
-			MTP_int(tgcalls::Meta::MaxLayer()),
+			MTP_int(kMaxLayer),
 			MTP_vector(CollectVersionsForApi()))
 	)).done([=](const MTPphone_PhoneCall &result) {
 		Expects(result.type() == mtpc_phone_phoneCall);

@@ -1,0 +1,36 @@
+// Hand-written fixture for test_parse_protos.py. It has the shapes of protos/generated/v1/types.proto.
+/* A block comment that
+   spans two lines. */
+syntax = "proto3";
+
+package v1;
+
+option csharp_namespace = "ImpulseM.Protos.Types";
+
+message AccountAuthorizations {
+  int32 authorization_ttl_days = 1;
+  repeated v1.Authorization authorizations = 2;
+  reserved 3, 4;
+}
+
+message AccountChatThemes {
+  oneof value {
+    AccountChatThemesNotModified account_chat_themes_not_modified = 1;
+    AccountChatThemesValue account_chat_themes = 2; // trailing comment
+  }
+}
+
+message AccountChatThemesNotModified {
+}
+
+message AccountChatThemesValue {
+  int64 hash = 1;
+  reserved "text", "option";
+  optional string next_offset = 5;
+  optional bytes srp_B = 6;
+  repeated bool flags = 7;
+}
+
+message LongResponse { int64 value = 1; }
+
+message EmptyInline {}

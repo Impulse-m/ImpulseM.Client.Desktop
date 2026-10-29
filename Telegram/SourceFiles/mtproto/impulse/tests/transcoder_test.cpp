@@ -128,18 +128,6 @@ void Append(std::vector<std::uint8_t> &target, const std::vector<std::uint8_t> &
 	return 0;
 }
 
-// The id of the first method whose result has the given kind (bool, int, long).
-[[nodiscard]] std::uint32_t FindResultKindMethodId(
-		const Impulse::MappingTable &mapping,
-		std::string_view resultKind) {
-	for (const Impulse::MappingMethod &method : mapping.mapping().methods) {
-		if (method.resultKind == resultKind) {
-			return method.id;
-		}
-	}
-	return 0;
-}
-
 } // namespace
 
 IMPULSE_TEST(TranscoderEncodesMessageGolden) {
@@ -445,27 +433,49 @@ IMPULSE_TEST(TranscoderRejectsUnmappedResultMethod) {
 		DecodeResultErrorType(transcoder, 1u, {}) == "CLIENT_METHOD_NOT_MAPPED");
 }
 
-IMPULSE_TEST(TranscoderDecodesIntAndLongResults) {
+IMPULSE_TEST(TranscoderDecodesIntListResult) {
 	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
 	IMPULSE_CHECK(loaded.has_value());
 	if (!loaded) {
 		return;
 	}
 	const Impulse::Transcoder transcoder(*loaded);
-	const std::uint32_t intMethodId = FindResultKindMethodId(*loaded, "int");
-	IMPULSE_CHECK(intMethodId != 0);
-	if (intMethodId != 0) {
-		IMPULSE_CHECK(transcoder.decodeResult(intMethodId, Hex("08 2a"), {}) == Hex("2a000000"));
-		// An absent int result is zero.
-		IMPULSE_CHECK(transcoder.decodeResult(intMethodId, {}, {}) == Hex("00000000"));
+	const std::uint32_t methodId = loaded->methodId("contacts.getContactIDs").value_or(0);
+	IMPULSE_CHECK(methodId != 0);
+	if (methodId == 0) {
+		return;
 	}
-	const std::uint32_t longMethodId = FindResultKindMethodId(*loaded, "long");
-	IMPULSE_CHECK(longMethodId != 0);
-	if (longMethodId != 0) {
-		IMPULSE_CHECK(
-			transcoder.decodeResult(longMethodId, Hex("08 2a"), {})
-			== Hex("2a00000000000000"));
+	const std::vector<std::uint8_t> expected = Hex(
+		"15c4b51c 02000000 05000000 e8030000");
+	// Packed: one length-delimited field of varints 5 and 1000.
+	IMPULSE_CHECK(
+		transcoder.decodeResult(methodId, Hex("0a03 05 e8 07"), {}) == expected);
+	// Unpacked: one varint field per element.
+	IMPULSE_CHECK(
+		transcoder.decodeResult(methodId, Hex("08 05 08 e8 07"), {}) == expected);
+}
+
+IMPULSE_TEST(TranscoderDecodesLongListResult) {
+	const std::optional<Impulse::MappingTable> &loaded = RealMapping();
+	IMPULSE_CHECK(loaded.has_value());
+	if (!loaded) {
+		return;
 	}
+	const Impulse::Transcoder transcoder(*loaded);
+	const std::uint32_t methodId = loaded->methodId("messages.receivedQueue").value_or(0);
+	IMPULSE_CHECK(methodId != 0);
+	if (methodId == 0) {
+		return;
+	}
+	// Elements 300 and 2^32, the second one needs five varint bytes.
+	const std::vector<std::uint8_t> expected = Hex(
+		"15c4b51c 02000000 2c01000000000000 0000000001000000");
+	// Packed: one length-delimited field of varints 300 and 2^32.
+	IMPULSE_CHECK(
+		transcoder.decodeResult(methodId, Hex("0a07 ac02 80808080 10"), {}) == expected);
+	// Unpacked: one varint field per element.
+	IMPULSE_CHECK(
+		transcoder.decodeResult(methodId, Hex("08 ac02 08 80808080 10"), {}) == expected);
 }
 
 IMPULSE_TEST(TranscoderDecodesPackedAndUnpackedIntVectors) {

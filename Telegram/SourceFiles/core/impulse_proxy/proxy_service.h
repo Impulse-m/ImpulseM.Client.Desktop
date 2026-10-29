@@ -6,6 +6,7 @@
 // status are published on the main thread.
 #pragma once
 
+#include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "core/impulse_proxy/proxy_ping.h"
 #include "core/impulse_proxy/xray_runtime.h"
@@ -15,6 +16,7 @@
 #include "rpl/variable.h"
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +33,13 @@ struct SubscriptionRefresh final {
 	std::vector<ProxyState::Server> servers;
 	int skipped = 0;
 	ProxyInput::SubscriptionMeta meta;
+};
+
+// The refresh timer of one subscription, armed for its update interval.
+struct SubscriptionTimer final {
+	std::string url;
+	int hours = 0;
+	std::unique_ptr<base::Timer> timer;
 };
 
 class ImpulseProxyService final : public base::has_weak_ptr {
@@ -87,11 +96,19 @@ public:
 private:
 	void refreshRoute();
 
+	// Arms one timer per subscription with a positive update interval and
+	// drops the timers of the subscriptions that are gone or changed.
+	void armSubscriptionTimers(const ProxyState::State &state);
+
+	// Timer callback: downloads the subscription with the id and stores it.
+	void refreshTimed(const std::string &id);
+
 	const std::shared_ptr<ProxyServiceHost> host;
 	RestartsSettled restartsSettled;
 	ProxyState::State currentState;
 	rpl::variable<Xray::Status> stateVariable;
 	rpl::variable<ProxyRouting::Route> routeVariable;
+	std::map<std::string, SubscriptionTimer> refreshTimers;
 };
 
 } // namespace Impulse

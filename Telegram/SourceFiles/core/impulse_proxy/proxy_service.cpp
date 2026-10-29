@@ -1,17 +1,22 @@
 #include "core/impulse_proxy/proxy_service.h"
 
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "core/impulse_proxy/proxy_links.h"
 #include "core/impulse_proxy/proxy_subscription.h"
 #include "core/impulse_proxy/xray_libxray.h"
 #include "crl/crl_on_main.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -59,6 +64,45 @@ namespace {
 	return [](const std::string &, const std::string &) {
 		return std::string();
 	};
+}
+
+// Writes the outcome of a timed refresh into the stored subscription. A
+// failed download keeps the servers and records the error, as a manual
+// refresh does. Runs on the main thread.
+void StoreTimedRefresh(
+		const std::string &id,
+		const SubscriptionRefresh &result) {
+	ProxyState::State state
+		= Core::App().settings().proxy().impulseProxyState();
+	std::vector<ProxyState::Subscription>::iterator found
+		= std::find_if(
+			state.subscriptions.begin(),
+			state.subscriptions.end(),
+			[&](const ProxyState::Subscription &subscription) {
+				return subscription.id == id;
+			});
+	if (found == state.subscriptions.end()) {
+		return;
+	}
+	const std::int64_t now = QDateTime::currentMSecsSinceEpoch();
+	if (!result.error.empty()) {
+		found->lastError = result.error;
+		found->updatedAt = now;
+	} else {
+		found->meta.title = result.meta.title;
+		found->meta.upload = result.meta.upload;
+		found->meta.download = result.meta.download;
+		found->meta.total = result.meta.total;
+		found->meta.expire = result.meta.expire;
+		found->meta.updateIntervalHours = result.meta.updateIntervalHours;
+		found->lastError.reset();
+		found->updatedAt = now;
+		found->skipped = result.skipped;
+		found->servers = result.servers;
+	}
+	Core::App().settings().proxy().setImpulseProxyState(std::move(state));
+	Core::App().saveSettingsDelayed();
+	Core::App().refreshGlobalProxy();
 }
 
 } // namespace
@@ -205,6 +249,7 @@ ImpulseProxyService::~ImpulseProxyService() {
 
 void ImpulseProxyService::apply(const ProxyState::State &state) {
 	currentState = state;
+	armSubscriptionTimers(state);
 	const std::string key = ImpulseCoreKey(state);
 	const std::shared_ptr<ProxyServiceHost> shared = host;
 	const base::weak_ptr<ImpulseProxyService> weak = base::make_weak(this);
@@ -391,6 +436,58 @@ void ImpulseProxyService::refreshRoute() {
 	if (routeVariable.current() != route) {
 		routeVariable = route;
 	}
+}
+
+void ImpulseProxyService::armSubscriptionTimers(
+		const ProxyState::State &state) {
+	constexpr crl::time kMillisInHour = crl::time(60) * 60 * 1000;
+	std::map<std::string, SubscriptionTimer> next;
+	for (const ProxyState::Subscription &subscription
+			: state.subscriptions) {
+		const int hours = subscription.meta.updateIntervalHours;
+		if (hours < 1) {
+			continue;
+		}
+		std::map<std::string, SubscriptionTimer>::iterator existing
+			= refreshTimers.find(subscription.id);
+		if (existing != refreshTimers.end()
+				&& existing->second.url == subscription.url
+				&& existing->second.hours == hours) {
+			next.emplace(subscription.id, std::move(existing->second));
+			refreshTimers.erase(existing);
+			continue;
+		}
+		SubscriptionTimer armed;
+		armed.url = subscription.url;
+		armed.hours = hours;
+		const std::string id = subscription.id;
+		armed.timer = std::make_unique<base::Timer>([this, id] {
+			refreshTimed(id);
+		});
+		armed.timer->callEach(kMillisInHour * hours);
+		next.emplace(subscription.id, std::move(armed));
+	}
+	refreshTimers = std::move(next);
+}
+
+void ImpulseProxyService::refreshTimed(const std::string &id) {
+	const ProxyState::State state
+		= Core::App().settings().proxy().impulseProxyState();
+	std::vector<ProxyState::Subscription>::const_iterator found
+		= std::find_if(
+			state.subscriptions.begin(),
+			state.subscriptions.end(),
+			[&](const ProxyState::Subscription &subscription) {
+				return subscription.id == id;
+			});
+	if (found == state.subscriptions.end()) {
+		return;
+	}
+	refreshSubscription(
+		found->url,
+		[id](SubscriptionRefresh result) {
+			StoreTimedRefresh(id, result);
+		});
 }
 
 } // namespace Impulse

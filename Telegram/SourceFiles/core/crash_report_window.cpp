@@ -245,7 +245,7 @@ NotStartedWindow::NotStartedWindow()
 : _label(this)
 , _log(this)
 , _close(this) {
-	_label.setText(u"Could not start Telegram Desktop!\nYou can see complete log below:"_q);
+	_label.setText(u"Could not start %1!\nYou can see complete log below:"_q.arg(AppName.utf16()));
 
 	_log.setPlainText(Logs::full());
 

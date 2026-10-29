@@ -42,6 +42,8 @@ include(cmake/td_ui.cmake)
 include(cmake/td_webauthn.cmake)
 include(cmake/telegram_apple_swift_runtime.cmake)
 include(cmake/generate_appstream_changelog.cmake)
+include(cmake/impulse/sources.cmake)
+include(cmake/impulse/tests.cmake)
 
 if (DESKTOP_APP_TEST_APPS)
     include(cmake/tests.cmake)

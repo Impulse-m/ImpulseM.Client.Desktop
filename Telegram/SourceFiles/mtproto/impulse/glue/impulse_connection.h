@@ -149,6 +149,7 @@ private:
 	struct PendingRequest {
 		RpcCarrierDone done;
 		RpcCarrierRequest deferred;
+		std::string method;
 		std::uint64_t carrierCallId = 0;
 		std::uint32_t methodId = 0;
 		bool needsLogin = false;
@@ -163,6 +164,7 @@ private:
 		std::vector<std::uint8_t> data)>;
 
 	[[nodiscard]] bool loginReady() const;
+	void noteLoginReady();
 	void bindUser(std::int64_t userId);
 	void releaseLoginWaiters();
 	void dispatch(
@@ -228,6 +230,11 @@ private:
 	bool started = false;
 	bool mediaPublished = false;
 	bool networkLost = false;
+
+	// The serial of this instance in the process, and whether its login was
+	// seen ready, for the diagnostic lines.
+	std::uint64_t serial = 0;
+	bool loginReadyNoted = false;
 };
 
 } // namespace Impulse

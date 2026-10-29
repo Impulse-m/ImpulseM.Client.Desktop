@@ -4,6 +4,7 @@
 #include "config.h"
 #include "core/application.h"
 #include "logs.h"
+#include "mtproto/impulse/core/hash.h"
 #include "mtproto/impulse/core/mapping.h"
 #include "mtproto/impulse/core/method_classes.h"
 #include "mtproto/impulse/core/proxy_routing.h"
@@ -117,6 +118,82 @@ constexpr std::string_view kPercentHexDigits = "0123456789ABCDEF";
 
 // The proxy epoch of the process. It advances once per proxy change.
 std::atomic<std::uint64_t> proxyEpochCounter{ 0 };
+
+// The serial of each connection instance of the process, for the diagnostic
+// lines. The first instance is 1.
+std::atomic<std::uint64_t> connectionSerialCounter{ 0 };
+
+// The constructors that the diagnostic lines look for in a realtime frame.
+constexpr std::uint32_t kUpdateShortConstructor = 0x78d4dec1;
+constexpr std::uint32_t kUpdatesContainerConstructor = 0x74ae4240;
+constexpr std::uint32_t kVectorConstructor = 0x1cb5c415;
+constexpr std::uint32_t kUpdateLoginTokenConstructor = 0x564fe691;
+
+// The word at the offset of TL bytes, little-endian. Zero when the bytes end
+// before the word.
+[[nodiscard]] std::uint32_t ReadWordAt(
+		const std::vector<std::uint8_t> &bytes,
+		std::size_t offset) {
+	if (bytes.size() < offset + 4) {
+		return 0;
+	}
+	return static_cast<std::uint32_t>(bytes[offset])
+		| (static_cast<std::uint32_t>(bytes[offset + 1]) << 8)
+		| (static_cast<std::uint32_t>(bytes[offset + 2]) << 16)
+		| (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+}
+
+// True when the first update of a realtime frame is updateLoginToken. The
+// frame is an updateShort, or an updates container whose vector starts with
+// that update. Only the first update is looked at.
+[[nodiscard]] bool StartsWithLoginTokenUpdate(const std::vector<std::uint8_t> &updates) {
+	const std::uint32_t constructor = ReadWordAt(updates, 0);
+	if (constructor == kUpdateShortConstructor) {
+		return ReadWordAt(updates, 4) == kUpdateLoginTokenConstructor;
+	}
+	if (constructor == kUpdatesContainerConstructor) {
+		return ReadWordAt(updates, 4) == kVectorConstructor
+			&& ReadWordAt(updates, 12) == kUpdateLoginTokenConstructor;
+	}
+	return false;
+}
+
+[[nodiscard]] QString YesNo(bool value) {
+	return QString::fromLatin1(value ? "yes" : "no");
+}
+
+[[nodiscard]] QString OutcomeKindName(CarrierOutcomeKind kind) {
+	switch (kind) {
+	case CarrierOutcomeKind::Reply:
+		return QString::fromLatin1("reply");
+	case CarrierOutcomeKind::RpcError:
+		return QString::fromLatin1("rpc_error");
+	case CarrierOutcomeKind::NetworkFailure:
+		return QString::fromLatin1("network_failure");
+	}
+	return QString::fromLatin1("unknown");
+}
+
+// A short tag of an identity token for the diagnostic lines: the first four
+// bytes of the SHA-256 of its subject, in hex, and its orig_iat. The token and
+// the subject itself are never written.
+[[nodiscard]] QString IdentityTagOf(const std::string &identityToken) {
+	if (identityToken.empty()) {
+		return QString::fromLatin1("none");
+	}
+	const std::optional<TokenClaims> claims = readTokenClaims(identityToken);
+	if (!claims) {
+		return QString::fromLatin1("unreadable");
+	}
+	const Sha256Digest digest = Sha256(claims->sub);
+	QString hex;
+	for (std::size_t index = 0; index < 4; ++index) {
+		hex += QString::number(digest[index] >> 4, 16);
+		hex += QString::number(digest[index] & 0x0F, 16);
+	}
+	return QString::fromLatin1("%1 orig_iat %2").arg(hex).arg(
+		QString::number(claims->origIat));
+}
 
 // A TL object of the given constructor followed by zero bytes of its fields.
 [[nodiscard]] std::vector<std::uint8_t> ConstructorBytes(
@@ -259,6 +336,8 @@ private:
 } // namespace
 
 ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
+	serial = connectionSerialCounter.fetch_add(1) + 1;
+
 	// The session pair goes to the account blob, the identity token to its own
 	// file. Loading them does not dial.
 	sessionStore = std::make_unique<AccountSessionStore>(
@@ -381,6 +460,7 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 		}
 		refreshIdentityLane();
 		releaseLoginWaiters();
+		noteLoginReady();
 		declarer->credentialChanged();
 	});
 
@@ -440,10 +520,20 @@ ImpulseConnection::ImpulseConnection(ImpulseAccountStorage storage) {
 			return currentCredential();
 		});
 
+	DEBUG_LOG(("Impulse Info: connection %1 created, session %2, account user %3."
+		).arg(QString::number(serial)
+		).arg(YesNo(tokens->hasSession())
+		).arg(YesNo(storage.userId != 0)));
+
 	buildTransport(ReadRoute());
 }
 
 ImpulseConnection::~ImpulseConnection() {
+	DEBUG_LOG(("Impulse Info: connection %1 destroyed, session %2, user %3."
+		).arg(QString::number(serial)
+		).arg(YesNo(tokens && tokens->hasSession())
+		).arg(YesNo(userId != 0)));
+
 	// Destruction cancels every pending completion. The carrier settles the
 	// open calls with a network failure while it closes, and those done
 	// callbacks do not run. The media pool goes before the update client it is
@@ -617,6 +707,7 @@ void ImpulseConnection::send(
 	if (pending->capturesLogin) {
 		pending->methodId = MappedMethodId(method);
 	}
+	pending->method = method;
 	pendingRequests[requestId] = pending;
 
 	// A call that needs a login waits for it, as Android does. The waiting
@@ -650,12 +741,23 @@ bool ImpulseConnection::loginReady() const {
 	return (userId != 0) && tokens->hasSession();
 }
 
+void ImpulseConnection::noteLoginReady() {
+	const bool ready = loginReady();
+	if (ready && !loginReadyNoted) {
+		DEBUG_LOG(("Impulse Info: connection %1 is login ready, user %2."
+			).arg(QString::number(serial)
+			).arg(QString::number(userId)));
+	}
+	loginReadyNoted = ready;
+}
+
 void ImpulseConnection::bindUser(std::int64_t userIdValue) {
 	userId = userIdValue;
 	laneIdentity.userId = userIdValue;
 	if (lanes) {
 		lanes->setIdentity(laneIdentity);
 	}
+	noteLoginReady();
 }
 
 void ImpulseConnection::releaseLoginWaiters() {
@@ -690,6 +792,22 @@ void ImpulseConnection::dispatch(
 	// method outside the identity set on a signed-out one.
 	request.route.signedIn = loginReady();
 
+	const RouteDecision decision = routeMethod(request.route);
+	if (decision.refused) {
+		DEBUG_LOG(("Impulse Info: connection %1 refused %2 locally as %3, signed in %4."
+			).arg(QString::number(serial)
+			).arg(QString::fromStdString(request.route.method)
+			).arg(QString::fromStdString(decision.refusalType)
+			).arg(YesNo(request.route.signedIn)));
+	} else if (!request.route.signedIn
+		&& isIdentitySocketMethod(request.route.method)
+		&& !isPoolOnlyMethod(request.route.method)) {
+		DEBUG_LOG(("Impulse Info: connection %1 sends %2 on the identity socket, identity %3."
+			).arg(QString::number(serial)
+			).arg(QString::fromStdString(request.route.method)
+			).arg(IdentityTagOf(identity->current())));
+	}
+
 	if (!rpcCarrier) {
 		// No carrier while the transport is being rebuilt or the route is
 		// blocked: the call fails as a network failure at once.
@@ -720,6 +838,12 @@ void ImpulseConnection::settle(
 		&& reply.outcome.kind == CarrierOutcomeKind::Reply
 		&& loginFlow) {
 		static_cast<void>(loginFlow->onReply(pending->methodId, reply.data));
+	}
+	if (pending->capturesLogin) {
+		DEBUG_LOG(("Impulse Info: connection %1 settled login call %2 as %3."
+			).arg(QString::number(serial)
+			).arg(QString::fromStdString(pending->method)
+			).arg(OutcomeKindName(reply.outcome.kind)));
 	}
 	const std::map<mtpRequestId, std::shared_ptr<PendingRequest>>::iterator found
 		= pendingRequests.find(requestId);
@@ -858,6 +982,10 @@ void ImpulseConnection::refreshIdentityLane() {
 }
 
 void ImpulseConnection::adoptLogin(const SessionTokens &pair) {
+	DEBUG_LOG(("Impulse Info: connection %1 adopts a login of user %2."
+		).arg(QString::number(serial)
+		).arg(QString::number(pair.userId)));
+
 	// The pair ends the connection identity: the session change discards it
 	// and retires the media pool.
 	tokens->onLoginTokens(pair);
@@ -1042,6 +1170,10 @@ std::unique_ptr<LanesObserver> ImpulseConnection::makeLanes() {
 }
 
 void ImpulseConnection::deliverUpdates(const std::vector<std::uint8_t> &updates) {
+	if (StartsWithLoginTokenUpdate(updates)) {
+		DEBUG_LOG(("Impulse Info: connection %1 received updateLoginToken on the update socket."
+			).arg(QString::number(serial)));
+	}
 	if (!updatesHandler) {
 		return;
 	}

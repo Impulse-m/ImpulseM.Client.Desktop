@@ -1,5 +1,6 @@
 #include "mtproto/impulse/glue/login_flow.h"
 
+#include "logs.h"
 #include "mtproto/impulse/core/login_user_id.h"
 #include "mtproto/impulse/glue/identity_manager.h"
 
@@ -14,6 +15,10 @@ namespace {
 
 // The subject of a connection identity is "i:" followed by 32 hex digits.
 constexpr std::string_view IdentitySubjectPrefix = "i:";
+
+[[nodiscard]] QString YesNo(bool value) {
+	return QString::fromLatin1(value ? "yes" : "no");
+}
 
 } // namespace
 
@@ -59,14 +64,27 @@ bool LoginFlow::onReply(
 					pair.refreshToken = std::string(value);
 				}
 			});
-	} catch (const TranscodeError &) {
-		return false;
-	}
-	if (pair.accessToken.empty() || pair.refreshToken.empty()) {
+	} catch (const TranscodeError &error) {
+		// The error type only: the message is not written.
+		const QString errorType = QString::fromStdString(std::string(error.type()));
+		DEBUG_LOG(("Impulse Info: login reply of method %1 did not transcode, error %2."
+			).arg(QString::number(methodId)
+			).arg(errorType));
 		return false;
 	}
 
+	// Presence only: the values of the tokens and the user id are never
+	// written.
 	const std::optional<std::int64_t> userId = AuthorizationUserId(tl);
+	DEBUG_LOG(("Impulse Info: login reply of method %1, access token %2, refresh token %3, user id %4."
+		).arg(QString::number(methodId)
+		).arg(YesNo(!pair.accessToken.empty())
+		).arg(YesNo(!pair.refreshToken.empty())
+		).arg(YesNo(userId.has_value())));
+
+	if (pair.accessToken.empty() || pair.refreshToken.empty()) {
+		return false;
+	}
 	if (!userId) {
 		return false;
 	}

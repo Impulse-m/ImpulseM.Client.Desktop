@@ -180,6 +180,49 @@ private:
 	Runtime &runtime;
 };
 
+const Impulse::Json::Value *Node(
+		const Impulse::Json::Value *node,
+		std::string_view key) {
+	return node ? node->find(key) : nullptr;
+}
+
+Impulse::Json::Value FirstOutbound(const Impulse::Json::Value &config) {
+	const std::vector<Impulse::Json::Value> *outbounds = ArrayMember(&config, "outbounds");
+	return outbounds && !outbounds->empty() ? (*outbounds)[0] : Impulse::Json::Value();
+}
+
+std::string FirstText(const std::vector<Impulse::Json::Value> *items) {
+	const std::string *text = items && !items->empty() ? (*items)[0].asString() : nullptr;
+	return text ? *text : std::string();
+}
+
+// A VLESS outbound over TLS with one user. The flow member is optional and
+// given with its leading comma.
+std::string TlsOutbound(const std::string &flowMember) {
+	return "{\"protocol\":\"vless\",\"settings\":{\"vnext\":[{\"address\":\"h.example\","
+		"\"port\":443,\"users\":[{\"id\":\"11111111-1111-1111-1111-111111111111\","
+		"\"encryption\":\"none\"" + flowMember + "}]}]},"
+		"\"streamSettings\":{\"network\":\"tcp\",\"security\":\"tls\","
+		"\"tlsSettings\":{\"serverName\":\"a\"}}}";
+}
+
+Impulse::ProxyState::State StateWithOutbound(const std::string &outbound) {
+	Impulse::ProxyState::State state = MakeState(true);
+	state.manual[0].outbound = outbound;
+	return state;
+}
+
+// The run config that a successful start of the state gives to runXray.
+Impulse::Json::Value StartedConfig(const Impulse::ProxyState::State &state) {
+	FakeCore core;
+	InstallHealthy(core);
+	Runtime runtime([&core](const std::string &method, const std::string &payload) {
+		return core.invoke(method, payload);
+	});
+	runtime.restart(state);
+	return ConfigOf(core.payloads["runXray"]);
+}
+
 } // namespace
 
 IMPULSE_TEST(XrayRuntimeErrorCodesAreAndroidTexts) {
@@ -595,4 +638,141 @@ IMPULSE_TEST(XrayKillSwitchTransportOffStaysDirectWhileCoreIsDown) {
 	const Route route = Decide(true, false, false);
 	IMPULSE_CHECK(route == Route::Direct);
 	IMPULSE_CHECK(!SelectEndpoint(route, std::nullopt).has_value());
+}
+
+IMPULSE_TEST(XrayConfigDefaultAdvancedAddsNoOptionalKeys) {
+	const Impulse::Json::Value config = StartedConfig(
+		StateWithOutbound(TlsOutbound("")));
+	IMPULSE_CHECK(config.find("dns") == nullptr);
+	const std::vector<Impulse::Json::Value> *outbounds = ArrayMember(&config, "outbounds");
+	IMPULSE_CHECK(outbounds != nullptr);
+	if (!outbounds || outbounds->size() != 1) {
+		return;
+	}
+	const Impulse::Json::Value &proxy = (*outbounds)[0];
+	IMPULSE_CHECK(TextMember(&proxy, "tag") == "proxy");
+	IMPULSE_CHECK(proxy.find("mux") == nullptr);
+	const Impulse::Json::Value *stream = Node(&proxy, "streamSettings");
+	IMPULSE_CHECK(stream != nullptr);
+	IMPULSE_CHECK(Node(stream, "sockopt") == nullptr);
+	IMPULSE_CHECK(Node(stream, "finalmask") == nullptr);
+	const Impulse::Json::Value *tls = Node(stream, "tlsSettings");
+	IMPULSE_CHECK(TextMember(tls, "serverName") == "a");
+	IMPULSE_CHECK(Node(tls, "fingerprint") == nullptr);
+}
+
+IMPULSE_TEST(XrayConfigFingerprintSetsTheTlsSettings) {
+	Impulse::ProxyState::State state = StateWithOutbound(TlsOutbound(""));
+	state.advanced.fingerprint = "chrome";
+	const Impulse::Json::Value proxy = FirstOutbound(StartedConfig(state));
+	const Impulse::Json::Value *stream = Node(&proxy, "streamSettings");
+	IMPULSE_CHECK(TextMember(Node(stream, "tlsSettings"), "fingerprint") == "chrome");
+	IMPULSE_CHECK(Node(stream, "realitySettings") == nullptr);
+}
+
+IMPULSE_TEST(XrayConfigMuxIsAddedExceptForVision) {
+	Impulse::ProxyState::State plain = StateWithOutbound(TlsOutbound(""));
+	plain.advanced.muxEnabled = true;
+	plain.advanced.muxConcurrency = 4;
+	const Impulse::Json::Value plainProxy = FirstOutbound(StartedConfig(plain));
+	const Impulse::Json::Value *mux = Node(&plainProxy, "mux");
+	IMPULSE_CHECK(mux != nullptr);
+	IMPULSE_CHECK(Node(mux, "enabled") && Node(mux, "enabled")->asBool() == true);
+	IMPULSE_CHECK(IntMember(mux, "concurrency") == 4);
+
+	Impulse::ProxyState::State vision = StateWithOutbound(
+		TlsOutbound(",\"flow\":\"xtls-rprx-vision\""));
+	vision.advanced = plain.advanced;
+	const Impulse::Json::Value visionProxy = FirstOutbound(StartedConfig(vision));
+	IMPULSE_CHECK(Node(&visionProxy, "mux") == nullptr);
+}
+
+IMPULSE_TEST(XrayConfigClassicFragmentDialsThroughTheFreedomOutbound) {
+	Impulse::ProxyState::State state = StateWithOutbound(TlsOutbound(""));
+	state.advanced.fragmentMode = "classic";
+	state.advanced.fragmentPackets = "1-3";
+	state.advanced.fragmentLength = "10-20";
+	state.advanced.fragmentInterval = "5-6";
+	state.advanced.keepAliveIdle = 30;
+	state.advanced.keepAliveInterval = 10;
+	state.advanced.tcpFastOpen = true;
+	state.advanced.tcpMaxSeg = 1300;
+	state.advanced.dnsMode = "google";
+	const Impulse::Json::Value config = StartedConfig(state);
+	const std::vector<Impulse::Json::Value> *outbounds = ArrayMember(&config, "outbounds");
+	IMPULSE_CHECK(outbounds != nullptr);
+	if (!outbounds || outbounds->size() != 2) {
+		return;
+	}
+	const Impulse::Json::Value &proxy = (*outbounds)[0];
+	const Impulse::Json::Value &freedom = (*outbounds)[1];
+	IMPULSE_CHECK(TextMember(&freedom, "tag") == "fragment");
+	IMPULSE_CHECK(TextMember(&freedom, "protocol") == "freedom");
+	const Impulse::Json::Value *fragment = Node(Node(&freedom, "settings"), "fragment");
+	IMPULSE_CHECK(TextMember(fragment, "packets") == "1-3");
+	IMPULSE_CHECK(TextMember(fragment, "length") == "10-20");
+	IMPULSE_CHECK(TextMember(fragment, "interval") == "5-6");
+
+	const Impulse::Json::Value *proxySockopt = Node(Node(&proxy, "streamSettings"), "sockopt");
+	IMPULSE_CHECK(TextMember(proxySockopt, "dialerProxy") == "fragment");
+	IMPULSE_CHECK(proxySockopt && proxySockopt->asObject() && proxySockopt->asObject()->size() == 1);
+
+	const Impulse::Json::Value *dialer = Node(Node(&freedom, "streamSettings"), "sockopt");
+	IMPULSE_CHECK(IntMember(dialer, "tcpKeepAliveIdle") == 30);
+	IMPULSE_CHECK(IntMember(dialer, "tcpKeepAliveInterval") == 10);
+	IMPULSE_CHECK(Node(dialer, "tcpFastOpen") && Node(dialer, "tcpFastOpen")->asBool() == true);
+	IMPULSE_CHECK(IntMember(dialer, "tcpMaxSeg") == 1300);
+	IMPULSE_CHECK(TextMember(Node(&freedom, "settings"), "domainStrategy") == "UseIPv4");
+
+	const Impulse::Json::Value *dns = config.find("dns");
+	IMPULSE_CHECK(dns != nullptr);
+	IMPULSE_CHECK(TextMember(dns, "queryStrategy") == "UseIPv4");
+	IMPULSE_CHECK(FirstText(ArrayMember(dns, "servers")) == "https://8.8.8.8/dns-query");
+}
+
+IMPULSE_TEST(XrayConfigFinalMaskIsOnTheProxyStream) {
+	Impulse::ProxyState::State state = StateWithOutbound(TlsOutbound(""));
+	state.advanced.fragmentMode = "finalmask";
+	const Impulse::Json::Value config = StartedConfig(state);
+	const std::vector<Impulse::Json::Value> *outbounds = ArrayMember(&config, "outbounds");
+	IMPULSE_CHECK(outbounds != nullptr && outbounds->size() == 1);
+	const Impulse::Json::Value proxy = FirstOutbound(config);
+	const Impulse::Json::Value *finalMask = Node(Node(&proxy, "streamSettings"), "finalmask");
+	const std::vector<Impulse::Json::Value> *tcp = ArrayMember(finalMask, "tcp");
+	IMPULSE_CHECK(tcp != nullptr && tcp->size() == 1);
+	if (!tcp || tcp->size() != 1) {
+		return;
+	}
+	const Impulse::Json::Value &mask = (*tcp)[0];
+	IMPULSE_CHECK(TextMember(&mask, "type") == "fragment");
+	const Impulse::Json::Value *settings = Node(&mask, "settings");
+	IMPULSE_CHECK(TextMember(settings, "packets") == "tlshello");
+	IMPULSE_CHECK(FirstText(ArrayMember(settings, "lengths")) == "100-200");
+	IMPULSE_CHECK(FirstText(ArrayMember(settings, "delays")) == "10-20");
+}
+
+IMPULSE_TEST(XrayConfigFragmentFromLinkIsClassicWhenModeIsOff) {
+	Impulse::ProxyState::State state = StateWithOutbound(TlsOutbound(""));
+	state.manual[0].shareLink = std::string(
+		"vless://u@h.example:443?type=tcp&fragment=1-10%2C5-20%2Ctlshello%2C3#name");
+	const Impulse::Json::Value config = StartedConfig(state);
+	const std::vector<Impulse::Json::Value> *outbounds = ArrayMember(&config, "outbounds");
+	IMPULSE_CHECK(outbounds != nullptr && outbounds->size() == 2);
+	if (!outbounds || outbounds->size() != 2) {
+		return;
+	}
+	const Impulse::Json::Value &freedom = (*outbounds)[1];
+	const Impulse::Json::Value *fragment = Node(Node(&freedom, "settings"), "fragment");
+	IMPULSE_CHECK(TextMember(fragment, "packets") == "tlshello");
+	IMPULSE_CHECK(TextMember(fragment, "length") == "1-10");
+	IMPULSE_CHECK(TextMember(fragment, "interval") == "5-20");
+}
+
+IMPULSE_TEST(XrayConfigInvalidLinkFragmentIsIgnored) {
+	Impulse::ProxyState::State state = StateWithOutbound(TlsOutbound(""));
+	state.manual[0].shareLink = std::string(
+		"vless://u@h.example:443?fragment=10-1,5-20,tlshello#name");
+	const Impulse::Json::Value config = StartedConfig(state);
+	const std::vector<Impulse::Json::Value> *outbounds = ArrayMember(&config, "outbounds");
+	IMPULSE_CHECK(outbounds != nullptr && outbounds->size() == 1);
 }

@@ -27,7 +27,6 @@ Pass each variable as a CMake option, for example `-D IMPULSEM_RPC_URL=https://r
 | `IMPULSEM_SITE_URL` | Base URL of the project website, without a trailing slash, for example `https://example.org`. Links to its pages and downloads are built from it. | Website menu entries and buttons are hidden, and text that linked to the website is shown without a link. |
 | `IMPULSEM_LINK_HOST` | Host of public share links, without a scheme, for example `o.example.org`. | No host is recognised statically. Links rely on the prefix sent by the server and on the app's URL scheme, and UI that needs a host to build a link is hidden. |
 | `IMPULSEM_WEB_URL` | URL of the web client, for example `https://web.example.org/k`. | "Open the web version" links are hidden. |
-| `IMPULSEM_MACOS_FEED_URL` | macOS app only. Base URL of the update feeds. | Not used on Windows and Linux. On macOS the update feed is not configured. |
 
 ## License
 

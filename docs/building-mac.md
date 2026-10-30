@@ -30,7 +30,7 @@ Go to ***BuildPath*/tdesktop/Telegram** and run (using [your **api_id** and **ap
 
     ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH -D IMPULSEM_RPC_URL=YOUR_RPC_URL
 
-Replace `YOUR_RPC_URL` with the base URL of the transport host. The other build variables are listed in the [build variables](../README.md#build-variables) section of the README. For the macOS app, also pass `IMPULSEM_MACOS_FEED_URL` the same way.
+Replace `YOUR_RPC_URL` with the base URL of the transport host. The other build variables are listed in the [build variables](../README.md#build-variables) section of the README.
 
 Then launch Xcode, open ***BuildPath*/tdesktop/out/Telegram.xcodeproj** and build for Debug / Release.
 

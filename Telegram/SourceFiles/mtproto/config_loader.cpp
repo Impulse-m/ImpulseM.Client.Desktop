@@ -21,6 +21,16 @@ namespace {
 constexpr auto kEnumerateDcTimeout = 8000; // 8 seconds timeout for help_getConfig to work (then move to other dc)
 constexpr auto kSpecialRequestTimeoutMs = 6000; // 4 seconds timeout for it to work in a specially requested dc.
 
+// ImpulseM: there are no built-in DC options, so until the server sends
+// its list the config is asked from the main DC again.
+[[nodiscard]] std::vector<DcId> EnumDcIds(not_null<Instance*> instance) {
+	std::vector<DcId> result = instance->dcOptions().configEnumDcIds();
+	if (result.empty() && !instance->isKeysDestroyer()) {
+		result.push_back(instance->mainDcId());
+	}
+	return result;
+}
+
 } // namespace
 
 ConfigLoader::ConfigLoader(
@@ -99,7 +109,7 @@ void ConfigLoader::enumerate() {
 	if (!_enumCurrent) {
 		_enumCurrent = _instance->mainDcId();
 	}
-	auto ids = _instance->dcOptions().configEnumDcIds();
+	std::vector<DcId> ids = EnumDcIds(_instance);
 	Assert(!ids.empty());
 
 	auto i = std::find(ids.cbegin(), ids.cend(), _enumCurrent);

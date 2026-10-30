@@ -426,8 +426,8 @@ void ShareProxy(
 			code.substr(noLinks.size() + 1)).toInt();
 		return tr::lng_impulse_proxy_error_no_links_skipped(
 			tr::now,
-			lt_count,
-			skipped);
+			lt_skipped,
+			QString::number(skipped));
 	}
 	return tr::lng_impulse_proxy_error_core(tr::now);
 }
@@ -1241,7 +1241,7 @@ void ProxiesBox::refreshStatus() {
 		text = tr::lng_impulse_proxy_connecting(tr::now);
 	}
 	_status->setText(text);
-	_status->setTextColorOverride(color->c);
+	_status->setTextColorOverride((*color)->c);
 }
 
 int ProxiesBox::rowHeight() const {

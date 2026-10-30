@@ -7,16 +7,24 @@ those names map exactly onto the brand values. Keys whose name starts with one o
 colour. Only the first literal of a value is rewritten, so references and fallbacks after "|" stay as they are. An
 alpha pair (#RRGGBBAA) keeps its alpha. Line endings are kept.
 
-The dark themes (DarkTheme) also follow the web surfaces. Their surface, background and divider keys are set to the
-web colours exactly. In the Night theme the teal accent family moves to the brand blue by the same HSV offset. Every
-other dark colour (value below 0.35, any saturation) moves by the per-channel delta between the theme's Telegram
-surface and the web surface. Bubble backgrounds are never moved by the teal or dark rules.
+The dark theme (DarkTheme, mode "tinted") is the ImpulseM night palette, shipped as night.tdesktop-theme and shown
+as "Tinted" in the picker. It is generated from upstream/dev:Telegram/Resources/night.tdesktop-theme. Its surface,
+background and divider keys are set to the web night colours exactly (#1D2128, #14181F, #0B0F15). The teal accent
+family moves to the brand blue by the same HSV offset. Every other dark colour (value below 0.35, any saturation)
+moves by the per-channel delta between the theme's Telegram surface and the web surface. Bubble backgrounds are never
+moved by the teal or dark rules. night-custom-base.tdesktop-theme, the dark base palette, is generated the same way
+from upstream/dev:Telegram/Resources/night-custom-base.tdesktop-theme; its background.jpg is kept as upstream.
+
+Night (night-green.tdesktop-theme, shown as "Night" in the picker) is not produced by this tool. It is shipped as the
+upstream archive kept as it was before the ImpulseM night wave: the bytes of the archive at commit 172766c848^ equal
+upstream/dev:Telegram/Resources/night-green.tdesktop-theme (same colors.tdesktop-theme, same background.png). No mode
+of this tool reproduces it, because its teal accent keys stay teal and its surfaces stay upstream.
 
 The tool is meant for the upstream palette. Running it on a palette it already changed shifts the brand colours
 again. Each output is computed from the upstream file, so re-running it is idempotent.
 
-Usage: python -I tools/impulse/brand/recolor_palette.py <colors.palette> [--theme day|tinted|night] [--output <file>]
-       python -I tools/impulse/brand/recolor_palette.py <name.tdesktop-theme> --theme day|tinted|night --output <file>
+Usage: python -I tools/impulse/brand/recolor_palette.py <colors.palette> [--theme day|tinted] [--output <file>]
+       python -I tools/impulse/brand/recolor_palette.py <name.tdesktop-theme> --theme day|tinted --output <file>
 A palette is written to standard output when --output is omitted. A zip archive (.tdesktop-theme) needs --output.
 """
 
@@ -125,20 +133,11 @@ class DarkTheme:
         return None
 
 
-# The Tinted theme (night.tdesktop-theme, shown as "Tinted" in the picker).
+# The ImpulseM night palette (night.tdesktop-theme, shown as "Tinted" in the picker). Its Telegram surface is the
+# upstream Tinted surface #17212B that the per-channel tint is measured from.
 TINTED: DarkTheme = DarkTheme(
     name="tinted",
     telegram_surface=0x17212B,
-    surface=0x1D2733,
-    background=0x151E27,
-    divider=0x0F151B,
-    teal_anchor=None,
-)
-
-# The Night theme (night-green.tdesktop-theme, shown as "Night" in the picker).
-NIGHT: DarkTheme = DarkTheme(
-    name="night",
-    telegram_surface=0x282E33,
     surface=0x1D2128,
     background=0x14181F,
     divider=0x0B0F15,
@@ -148,7 +147,6 @@ NIGHT: DarkTheme = DarkTheme(
 THEMES: Dict[str, Optional[DarkTheme]] = {
     "day": None,
     "tinted": TINTED,
-    "night": NIGHT,
 }
 
 

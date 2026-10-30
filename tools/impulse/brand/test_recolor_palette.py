@@ -123,60 +123,55 @@ def png_rgb_of(data: bytes) -> int:
 
 class DarkThemeTest(unittest.TestCase):
 
-    def test_night_surface_background_divider_are_exact(self) -> None:
-        self.assertEqual("windowBg: #1D2128; // x", recolor.transform_line("windowBg: #282e33; // x", True, recolor.NIGHT))
-        self.assertEqual("menuBg: #1D2128;", recolor.recolor_line("menuBg: #282e33;", recolor.NIGHT))
-        self.assertEqual("topBarBg: #1D2128;", recolor.recolor_line("topBarBg: #282e33;", recolor.NIGHT))
-        self.assertEqual("historyComposeAreaBg: #1D2128;", recolor.recolor_line("historyComposeAreaBg: #282e33;", recolor.NIGHT))
-        self.assertEqual("boxSearchBg: #1D2128;", recolor.recolor_line("boxSearchBg: #282e33;", recolor.NIGHT))
-        self.assertEqual("sideBarBg: #14181F;", recolor.recolor_line("sideBarBg: #18191d;", recolor.NIGHT))
-        self.assertEqual("menuSeparatorFg: #0B0F15;", recolor.recolor_line("menuSeparatorFg: #42484d;", recolor.NIGHT))
-
     def test_tinted_surface_background_divider_are_exact(self) -> None:
-        self.assertEqual("windowBg: #1D2733;", recolor.recolor_line("windowBg: #17212b;", recolor.TINTED))
-        self.assertEqual("boxBg: #1D2733;", recolor.recolor_line("boxBg: #17212b;", recolor.TINTED))
-        self.assertEqual("sideBarBg: #151E27;", recolor.recolor_line("sideBarBg: #0e1621;", recolor.TINTED))
-        self.assertEqual("menuSeparatorFg: #0F151B;", recolor.recolor_line("menuSeparatorFg: #232f39;", recolor.TINTED))
+        self.assertEqual("windowBg: #1D2128; // x", recolor.transform_line("windowBg: #17212b; // x", True, recolor.TINTED))
+        self.assertEqual("menuBg: #1D2128;", recolor.recolor_line("menuBg: #17212b;", recolor.TINTED))
+        self.assertEqual("topBarBg: #1D2128;", recolor.recolor_line("topBarBg: #17212b;", recolor.TINTED))
+        self.assertEqual("historyComposeAreaBg: #1D2128;", recolor.recolor_line("historyComposeAreaBg: #17212b;", recolor.TINTED))
+        self.assertEqual("boxSearchBg: #1D2128;", recolor.recolor_line("boxSearchBg: #17212b;", recolor.TINTED))
+        self.assertEqual("sideBarBg: #14181F;", recolor.recolor_line("sideBarBg: #0e1621;", recolor.TINTED))
+        self.assertEqual("menuSeparatorFg: #0B0F15;", recolor.recolor_line("menuSeparatorFg: #232f39;", recolor.TINTED))
+        self.assertEqual("boxBg: #1D2128;", recolor.recolor_line("boxBg: #17212b;", recolor.TINTED))
 
     def test_references_are_kept(self) -> None:
         for line in ["boxBg: windowBg;", "dialogsBg: windowBg;", "mainMenuBg: windowBg; // ref"]:
-            self.assertEqual(line, recolor.recolor_line(line, recolor.NIGHT))
             self.assertEqual(line, recolor.recolor_line(line, recolor.TINTED))
 
     def test_tint_moves_dark_colour_by_surface_delta(self) -> None:
-        # Night: web #1D2128 minus Telegram #282E33 is (-11, -13, -11); contactsBg #222528 becomes #17181D.
-        self.assertEqual("contactsBg: #17181D;", recolor.recolor_line("contactsBg: #222528;", recolor.NIGHT))
-        # Tinted: web #1D2733 minus Telegram #17212B is (+6, +6, +8); contactsBg #17212b becomes #1D2733.
-        self.assertEqual("contactsBg: #1D2733;", recolor.recolor_line("contactsBg: #17212b;", recolor.TINTED))
+        # Tinted: web #1D2128 minus Telegram #17212B is (+6, 0, -3); contactsBg #17212b becomes #1D2128.
+        self.assertEqual("contactsBg: #1D2128;", recolor.recolor_line("contactsBg: #17212b;", recolor.TINTED))
+        # Tinted: contactsBg #222528 moves by the same delta and becomes #282525.
+        self.assertEqual("contactsBg: #282525;", recolor.recolor_line("contactsBg: #222528;", recolor.TINTED))
 
     def test_tint_clamps_to_channel_range(self) -> None:
-        self.assertEqual("callBg: #000000;", recolor.recolor_line("callBg: #000000;", recolor.NIGHT))
+        # Blue channel 0 minus 3 clamps to 0; the red channel moves by +6.
+        self.assertEqual("callBg: #060000;", recolor.recolor_line("callBg: #000000;", recolor.TINTED))
 
     def test_dark_value_gate_boundary(self) -> None:
         # value 89/255 = 0.349 is dark, value 90/255 = 0.353 is not.
         self.assertTrue(recolor.is_dark(0x595959))
         self.assertFalse(recolor.is_dark(0x5A5A5A))
-        self.assertEqual("x: #4E4C4E;", recolor.recolor_line("x: #595959;", recolor.NIGHT))
-        self.assertEqual("x: #5A5A5A;", recolor.recolor_line("x: #5A5A5A;", recolor.NIGHT))
+        self.assertEqual("x: #5F5956;", recolor.recolor_line("x: #595959;", recolor.TINTED))
+        self.assertEqual("x: #5A5A5A;", recolor.recolor_line("x: #5A5A5A;", recolor.TINTED))
 
     def test_dark_gate_ignores_saturation(self) -> None:
         self.assertTrue(recolor.is_dark(0x001A33))
         self.assertTrue(recolor.is_dark(0x0E1621))
         # Tinted blue-grey keys with saturation near 0.5 move too.
-        self.assertEqual("lightButtonBg: #1D2733;", recolor.recolor_line("lightButtonBg: #17212b;", recolor.TINTED))
+        self.assertEqual("lightButtonBg: #1D2128;", recolor.recolor_line("lightButtonBg: #17212b;", recolor.TINTED))
 
     def test_bright_colours_are_not_tinted(self) -> None:
-        self.assertEqual("historyTextOutFg: #e4ecf2;", recolor.recolor_line("historyTextOutFg: #e4ecf2;", recolor.NIGHT))
+        self.assertEqual("historyTextOutFg: #e4ecf2;", recolor.recolor_line("historyTextOutFg: #e4ecf2;", recolor.TINTED))
 
     def test_alpha_is_kept_on_dark_colour(self) -> None:
-        self.assertEqual("radialBg: #10121Acc;", recolor.recolor_line("radialBg: #1b1f25cc;", recolor.NIGHT))
+        self.assertEqual("radialBg: #211F22cc;", recolor.recolor_line("radialBg: #1b1f25cc;", recolor.TINTED))
 
     def test_bubbles_are_not_tinted(self) -> None:
         for line in ["msgInBg: #33393f;", "msgOutBg: #2a2f33;", "msgServiceBg: #363c43c8;", "msgInShadow: #748ea200;"]:
-            self.assertEqual(line, recolor.recolor_line(line, recolor.NIGHT))
+            self.assertEqual(line, recolor.recolor_line(line, recolor.TINTED))
 
     def test_excluded_dark_keys_are_kept(self) -> None:
-        self.assertEqual("peerNameFg: #222528;", recolor.recolor_line("peerNameFg: #222528;", recolor.NIGHT))
+        self.assertEqual("peerNameFg: #222528;", recolor.recolor_line("peerNameFg: #222528;", recolor.TINTED))
 
     def test_tinted_bubble_blues_keep_the_blue_rule(self) -> None:
         # 1b67cb5d84 shifted these bubble blues; the blue rule is unchanged for Tinted.
@@ -186,10 +181,10 @@ class DarkThemeTest(unittest.TestCase):
         )
         self.assertEqual("msgInBgSelected: #2B92CB;", recolor.recolor_line("msgInBgSelected: #2e70a5;", recolor.TINTED))
 
-    def test_teal_moves_to_brand_blue_for_night(self) -> None:
-        self.assertEqual("windowBgActive: #58AEEE;", recolor.recolor_line("windowBgActive: #3fc1b0;", recolor.NIGHT))
-        self.assertEqual("windowActiveTextFg: #58AEEE;", recolor.recolor_line("windowActiveTextFg: #4be1c3;", recolor.NIGHT))
-        result: str = recolor.recolor_line("activeButtonBg: #2da192;", recolor.NIGHT)
+    def test_teal_moves_to_brand_blue_for_tinted(self) -> None:
+        self.assertEqual("windowBgActive: #58AEEE;", recolor.recolor_line("windowBgActive: #3fc1b0;", recolor.TINTED))
+        self.assertEqual("windowActiveTextFg: #58AEEE;", recolor.recolor_line("windowActiveTextFg: #4be1c3;", recolor.TINTED))
+        result: str = recolor.recolor_line("activeButtonBg: #2da192;", recolor.TINTED)
         changed: int = int(result.split("#")[1][:6], 16)
         expected_hue: float = (recolor.hsv_of(0x2DA192)[0] - recolor.hsv_of(recolor.UPSTREAM_TEAL)[0] + recolor.hsv_of(recolor.PRIMARY_NIGHT)[0]) % 1.0
         self.assertTrue(recolor.is_blue(changed))
@@ -200,12 +195,12 @@ class DarkThemeTest(unittest.TestCase):
         # Saturated teal with value 0.37 is below the teal value gate (0.40) and above the dark gate (0.35): kept.
         self.assertFalse(recolor.is_teal(0x0A5E5A))
         self.assertFalse(recolor.is_dark(0x0A5E5A))
-        self.assertEqual("x: #0A5E5A;", recolor.recolor_line("x: #0A5E5A;", recolor.NIGHT))
+        self.assertEqual("x: #0A5E5A;", recolor.recolor_line("x: #0A5E5A;", recolor.TINTED))
         # Hue 207 degrees is the blue range, not teal.
         self.assertFalse(recolor.is_teal(0x2F7FBF))
 
-    def test_teal_is_not_applied_to_tinted(self) -> None:
-        self.assertEqual("activeButtonBg: #2da192;", recolor.recolor_line("activeButtonBg: #2da192;", recolor.TINTED))
+    def test_teal_accent_follows_the_brand_blue_on_tinted(self) -> None:
+        self.assertEqual("activeButtonBg: #418DC7;", recolor.recolor_line("activeButtonBg: #2da192;", recolor.TINTED))
 
     def test_archive_writes_background_png_and_keeps_entries(self) -> None:
         names: List[str] = ["background.png", "colors.tdesktop-theme", "other.bin"]
@@ -217,7 +212,7 @@ class DarkThemeTest(unittest.TestCase):
                 writer.writestr("background.png", recolor.png_of(0x18191D), compress_type=zipfile.ZIP_STORED)
                 writer.writestr("colors.tdesktop-theme", palette)
                 writer.writestr("other.bin", b"\x00\x01\x02")
-            recolor.transform_archive(source, target, recolor.NIGHT)
+            recolor.transform_archive(source, target, recolor.TINTED)
             with zipfile.ZipFile(target) as reader:
                 self.assertEqual(names, [info.filename for info in reader.infolist()])
                 self.assertEqual(zipfile.ZIP_DEFLATED, reader.infolist()[0].compress_type)
@@ -238,7 +233,7 @@ class DarkThemeTest(unittest.TestCase):
             recolor.transform_archive(source, target, recolor.TINTED)
             with zipfile.ZipFile(target) as reader:
                 self.assertEqual(b"\xff\xd8\xff\xe0", reader.read("background.jpg"))
-                self.assertEqual(b"windowBg: #1D2733;\n", reader.read("colors.tdesktop-theme"))
+                self.assertEqual(b"windowBg: #1D2128;\n", reader.read("colors.tdesktop-theme"))
 
     def test_rerun_on_same_upstream_gives_same_bytes(self) -> None:
         # The output is computed from the upstream file, so a second run on that file writes the same bytes.
@@ -264,8 +259,8 @@ class DarkThemeTest(unittest.TestCase):
             second: Path = Path(directory) / "second.palette"
             source.write_bytes("\n".join(lines).encode("utf-8"))
             upstream_before: bytes = source.read_bytes()
-            self.assertEqual(0, recolor.main([str(source), "--theme", "night", "--output", str(first)]))
-            self.assertEqual(0, recolor.main([str(source), "--theme", "night", "--output", str(second)]))
+            self.assertEqual(0, recolor.main([str(source), "--theme", "tinted", "--output", str(first)]))
+            self.assertEqual(0, recolor.main([str(source), "--theme", "tinted", "--output", str(second)]))
             self.assertEqual(upstream_before, source.read_bytes())
             first_bytes: bytes = first.read_bytes()
             second_bytes: bytes = second.read_bytes()
@@ -277,7 +272,7 @@ class DarkThemeTest(unittest.TestCase):
         self.assertIn("menuSeparatorFg: #0B0F15;\n", first_text)
         self.assertIn("windowBgActive: #58AEEE; // teal accent\n", first_text)
         self.assertIn("activeButtonBg: #418DC7;\n", first_text)
-        self.assertIn("contactsBg: #17181D;\n", first_text)
+        self.assertIn("contactsBg: #282525;\n", first_text)
         self.assertIn("historyTextOutFg: #e4ecf2; // light\n", first_text)
 
 

@@ -62,7 +62,7 @@ Replace `YOUR_RPC_URL` with the base URL of the transport host. The other build 
 
 * Open ***BuildPath*\\tdesktop\\out\\Telegram.slnx** in Visual Studio 2026
 * Select the `Telegram` project and press Build > `Build Telegram` (Debug and Release configurations)
-* The result `Telegram.exe` will be located in **D:\TBuild\tdesktop\out\Debug** (and **Release**)
+* The result `Telegram.exe` will be located in ***BuildPath*\\tdesktop\\out\\Debug** (and **Release**)
 
 ### Qt Visual Studio Tools
 

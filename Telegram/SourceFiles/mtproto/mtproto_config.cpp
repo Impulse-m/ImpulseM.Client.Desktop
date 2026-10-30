@@ -223,9 +223,11 @@ const ConfigFields &Config::values() const {
 }
 
 void Config::apply(const MTPDconfig &data) {
+	// ImpulseM: the server still marks its config as test mode, so until it
+	// sends the production value the config is applied whatever the field
+	// says, as the Android client does.
 	if (mtpIsTrue(data.vtest_mode()) != _dcOptions.isTestMode()) {
-		LOG(("MTP Error: config with wrong test mode field received!"));
-		return;
+		LOG(("MTP Error: config with wrong test mode field received, applied."));
 	}
 
 	DEBUG_LOG(("MTP Info: got config, "

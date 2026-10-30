@@ -160,7 +160,7 @@ struct TopButtonMenuState {
 }
 
 [[nodiscard]] QColor ProxyQrActiveColor() {
-	return QColor(0x40, 0xA7, 0xE3);
+	return QColor(0x20, 0x85, 0xDF); // ImpulseM brand disc, as in the Android and web logo.
 }
 
 [[nodiscard]] QImage ProxyQr(const Qr::Data &data, int pixel, int max = 0) {

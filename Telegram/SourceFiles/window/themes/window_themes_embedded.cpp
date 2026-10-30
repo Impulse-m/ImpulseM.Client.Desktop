@@ -239,18 +239,18 @@ style::colorizer ColorizerFrom(
 		break;
 	case EmbeddedType::Night:
 		result.keepContrast = base::flat_map<QLatin1String, Pair>{ {
-			//{ qstr("windowFgActive"), Pair{ cColor("5288c1"), cColor("17212b") } }, // windowBgActive
-			{ qstr("activeButtonFg"), Pair{ cColor("2f6ea5"), cColor("1d2733") } }, // activeButtonBg
-			{ qstr("profileVerifiedCheckFg"), Pair{ cColor("5288c1"), cColor("1d2733") } }, // profileVerifiedCheckBg
-			{ qstr("overviewCheckFgActive"), Pair{ cColor("5288c1"), cColor("1d2733") } }, // overviewCheckBgActive
-			{ qstr("historyFileInIconFg"), Pair{ cColor("3f96d0"), cColor("182533") } }, // msgFileInBg, msgInBg
-			{ qstr("historyFileInIconFgSelected"), Pair{ cColor("6ab4f4"), cColor("2e70a5") } }, // msgFileInBgSelected, msgInBgSelected
-			{ qstr("historyFileInRadialFg"), Pair{ cColor("3f96d0"), cColor("182533") } }, // msgFileInBg, msgInBg
-			{ qstr("historyFileInRadialFgSelected"), Pair{ cColor("6ab4f4"), cColor("2e70a5") } }, // msgFileInBgSelected, msgInBgSelected
-			{ qstr("historyFileOutIconFg"), Pair{ cColor("4c9ce2"), cColor("2b5278") } }, // msgFileOutBg, msgOutBg
-			{ qstr("historyFileOutIconFgSelected"), Pair{ cColor("58abf3"), cColor("2e70a5") } }, // msgFileOutBgSelected, msgOutBgSelected
-			{ qstr("historyFileOutRadialFg"), Pair{ cColor("4c9ce2"), cColor("2b5278") } }, // msgFileOutBg, msgOutBg
-			{ qstr("historyFileOutRadialFgSelected"), Pair{ cColor("58abf3"), cColor("2e70a5") } }, // msgFileOutBgSelected, msgOutBgSelected
+			//{ qstr("windowFgActive"), Pair{ cColor("58aeee"), cColor("1d2733") } }, // windowBgActive
+			{ qstr("activeButtonFg"), Pair{ cColor("2c8fcb"), cColor("1d2733") } }, // activeButtonBg
+			{ qstr("profileVerifiedCheckFg"), Pair{ cColor("58aeee"), cColor("1d2733") } }, // profileVerifiedCheckBg
+			{ qstr("overviewCheckFgActive"), Pair{ cColor("58aeee"), cColor("1d2733") } }, // overviewCheckBgActive
+			{ qstr("historyFileInIconFg"), Pair{ cColor("3cc2ff"), cColor("182533") } }, // msgFileInBg, msgInBg
+			{ qstr("historyFileInIconFgSelected"), Pair{ cColor("61c3ff"), cColor("2b92cb") } }, // msgFileInBgSelected, msgInBgSelected
+			{ qstr("historyFileInRadialFg"), Pair{ cColor("3cc2ff"), cColor("182533") } }, // msgFileInBg, msgInBg
+			{ qstr("historyFileInRadialFgSelected"), Pair{ cColor("61c3ff"), cColor("2b92cb") } }, // msgFileInBgSelected, msgInBgSelected
+			{ qstr("historyFileOutIconFg"), Pair{ cColor("46b9ff"), cColor("2c6a94") } }, // msgFileOutBg, msgOutBg
+			{ qstr("historyFileOutIconFgSelected"), Pair{ cColor("4dbcff"), cColor("2b92cb") } }, // msgFileOutBgSelected, msgOutBgSelected
+			{ qstr("historyFileOutRadialFg"), Pair{ cColor("46b9ff"), cColor("2c6a94") } }, // msgFileOutBg, msgOutBg
+			{ qstr("historyFileOutRadialFgSelected"), Pair{ cColor("4dbcff"), cColor("2b92cb") } }, // msgFileOutBgSelected, msgOutBgSelected
 		} };
 		result.lightnessMin = 64;
 		break;

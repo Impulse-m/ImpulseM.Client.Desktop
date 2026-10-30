@@ -7,11 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "export/output/export_output_html.h"
 
-#include "core/impulse_build_links.h"
 #include "core/utils.h"
 #include "countries/countries_instance.h"
 #include "export/data/export_data_types.h"
 #include "export/output/export_output_result.h"
+#include "mtproto/impulse/core/build_config.h"
 #include "ui/grouped_layout_geometry.h"
 #include "ui/text/format_values.h"
 
@@ -218,11 +218,13 @@ QByteArray SerializeList(const std::vector<QByteArray> &values) {
 }
 
 QByteArray MakeLinks(const QByteArray &value) {
-	const auto siteRoot = Impulse::BuildLinks::SitePage(u"/"_q);
-	if (siteRoot.isEmpty()) {
+	// ImpulseM: the export target cannot see the UI headers, so it reads the
+	// site from the build configuration directly.
+	const auto site = Impulse::BuildConfig::SiteUrl();
+	if (site.empty()) {
 		return value;
 	}
-	const auto domain = siteRoot.toUtf8();
+	const auto domain = QByteArray(site.data(), qsizetype(site.size())) + '/';
 	auto result = QByteArray();
 	auto offset = 0;
 	while (true) {

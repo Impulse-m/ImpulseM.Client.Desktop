@@ -1170,7 +1170,7 @@ private:
 	rpl::variable<WorkMode> _workMode = WorkMode::WindowAndTray;
 	base::flags<Calls::Group::StickedTooltip> _hiddenGroupCallTooltips;
 	CloseBehavior _closeBehavior = CloseBehavior::Quit;
-	rpl::variable<bool> _trayIconMonochrome = true;
+	rpl::variable<bool> _trayIconMonochrome = false; // ImpulseM: the brand disc.
 	rpl::variable<QString> _customDeviceModel;
 	rpl::variable<Media::RepeatMode> _playerRepeatMode;
 	rpl::variable<Media::OrderMode> _playerOrderMode;

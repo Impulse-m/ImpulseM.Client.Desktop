@@ -991,6 +991,10 @@ void ImpulseConnection::adoptLogin(const SessionTokens &pair) {
 		).arg(QString::number(serial)
 		).arg(QString::number(pair.userId)));
 
+	// Rekeying starts before the pair is stored: the session change runs inside
+	// onLoginTokens and must not release the waiting calls on the old sockets.
+	rekeying = true;
+
 	// The pair ends the connection identity: the session change discards it
 	// and retires the media pool.
 	tokens->onLoginTokens(pair);
@@ -1001,7 +1005,6 @@ void ImpulseConnection::adoptLogin(const SessionTokens &pair) {
 	// client has no cached token and the update socket asks for the session
 	// token. The rebuild destroys the carrier that delivers this reply, so it
 	// runs once the reply is settled. Until then no login call is sent.
-	rekeying = true;
 	bindUser(pair.userId);
 	crl::on_main(this, [=] {
 		if (started) {

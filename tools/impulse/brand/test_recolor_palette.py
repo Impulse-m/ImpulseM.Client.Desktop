@@ -240,9 +240,45 @@ class DarkThemeTest(unittest.TestCase):
                 self.assertEqual(b"\xff\xd8\xff\xe0", reader.read("background.jpg"))
                 self.assertEqual(b"windowBg: #1D2733;\n", reader.read("colors.tdesktop-theme"))
 
-    def test_same_upstream_gives_same_output(self) -> None:
-        text: str = "windowBg: #282e33;\nsideBarBg: #18191d;\nactiveButtonBg: #2da192;\ncontactsBg: #222528;\n"
-        self.assertEqual(recolor.transform_palette(text, True, recolor.NIGHT), recolor.transform_palette(text, True, recolor.NIGHT))
+    def test_rerun_on_same_upstream_gives_same_bytes(self) -> None:
+        # The output is computed from the upstream file, so a second run on that file writes the same bytes.
+        # Feeding the output back in is not part of this property: the docstring says it shifts colours again.
+        lines: List[str] = [
+            "windowBg: #282e33; // surface",
+            "boxBg: #282e33;",
+            "boxSearchBg: #282e33;",
+            "menuBg: #282e33;",
+            "topBarBg: #282e33;",
+            "historyComposeAreaBg: #282e33;",
+            "sideBarBg: #18191d;",
+            "menuSeparatorFg: #42484d;",
+            "windowBgActive: #3fc1b0; // teal accent",
+            "activeButtonBg: #2da192;",
+            "contactsBg: #222528;",
+            "historyTextOutFg: #e4ecf2; // light",
+            "",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            source: Path = Path(directory) / "colors.palette"
+            first: Path = Path(directory) / "first.palette"
+            second: Path = Path(directory) / "second.palette"
+            source.write_bytes("\n".join(lines).encode("utf-8"))
+            upstream_before: bytes = source.read_bytes()
+            self.assertEqual(0, recolor.main([str(source), "--theme", "night", "--output", str(first)]))
+            self.assertEqual(0, recolor.main([str(source), "--theme", "night", "--output", str(second)]))
+            self.assertEqual(upstream_before, source.read_bytes())
+            first_bytes: bytes = first.read_bytes()
+            second_bytes: bytes = second.read_bytes()
+        self.assertEqual(first_bytes, second_bytes)
+        # The first run really recoloured the input: surfaces, teal accent and contacts moved, the light colour did not.
+        first_text: str = first_bytes.decode("utf-8")
+        self.assertIn("windowBg: #1D2128; // surface\n", first_text)
+        self.assertIn("sideBarBg: #14181F;\n", first_text)
+        self.assertIn("menuSeparatorFg: #0B0F15;\n", first_text)
+        self.assertIn("windowBgActive: #58AEEE; // teal accent\n", first_text)
+        self.assertIn("activeButtonBg: #418DC7;\n", first_text)
+        self.assertIn("contactsBg: #17181D;\n", first_text)
+        self.assertIn("historyTextOutFg: #e4ecf2; // light\n", first_text)
 
 
 if __name__ == "__main__":

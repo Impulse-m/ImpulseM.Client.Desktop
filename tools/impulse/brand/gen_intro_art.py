@@ -3,14 +3,17 @@
 The desktop client draws the intro cover plane and the QR screen centre as monochrome
 icons. lib_ui reads the brightness of each pixel as the mask, not its alpha, so the files
 are written as opaque RGBA: white is the shape, black is the background, and alpha is 255
-everywhere. The plane is replaced by a disc with the pulse cut out of it, taken from the
-same master logo as the icon set. The cover keeps its four parts, so only the top part
+everywhere. The cover plane is replaced by a disc with the pulse cut out of it, taken from
+the master logo of the Android client. The cover keeps its four parts, so only the top part
 carries the disc and the other three parts are written as empty black canvases of the same
-size, which keeps the layout unchanged.
+size, which keeps the layout unchanged. The QR centre is the pulse alone, white on black,
+with the geometry of the web client's padded logo: the QR screen paints the blue disc
+itself, so the mask only has to supply the pulse on top of it.
 
 Usage: python -I tools/impulse/brand/gen_intro_art.py --master <qr_logo.svg> --out-dir <icons dir>
 """
 import argparse
+import dataclasses
 import struct
 import sys
 import zlib
@@ -37,8 +40,12 @@ COVER_PARTS: Tuple[str, ...] = (
 )
 COVER_DISC_PART: str = "intro_plane_top"
 QR_NAME: str = "intro_qr_plane"
-QR_SIZE: int = 35
-QR_DISC_FRACTION: float = 0.9
+QR_SIZE: int = 44
+# Follow the web client's logo_padded.svg: disc radius 84, pulse scale 0.655, stroke 16.
+WEB_CENTER: float = 100.0
+WEB_DISC_RADIUS: float = 84.0
+WEB_PULSE_SCALE: float = 0.655
+WEB_PULSE_STROKE: float = 16.0
 
 
 def opaque_black(width: int, height: int) -> bytearray:
@@ -47,10 +54,9 @@ def opaque_black(width: int, height: int) -> bytearray:
     return canvas
 
 
-def render_mask(logo: gen.Logo, diameter: int) -> bytes:
-    raw: bytes = gen.render_logo(logo, diameter, 0.0, gen.WHITE, BLACK)
-    out: bytearray = bytearray(diameter * diameter * 4)
-    for slot in range(diameter * diameter):
+def brightness_mask(raw: bytes, size: int) -> bytes:
+    out: bytearray = bytearray(size * size * 4)
+    for slot in range(size * size):
         red: int = raw[slot * 4]
         alpha: int = raw[slot * 4 + 3]
         coverage: int = (alpha * red + 127) // 255
@@ -60,6 +66,43 @@ def render_mask(logo: gen.Logo, diameter: int) -> bytes:
         out[slot * 4 + 3] = 255
 
     return bytes(out)
+
+
+def render_mask(logo: gen.Logo, diameter: int) -> bytes:
+    raw: bytes = gen.render_logo(logo, diameter, 0.0, gen.WHITE, BLACK)
+    return brightness_mask(raw, diameter)
+
+
+def pulse_logo(logo: gen.Logo) -> gen.Logo:
+    points: Tuple[gen.Point, ...] = tuple(
+        (
+            WEB_CENTER + (x - WEB_CENTER) * WEB_PULSE_SCALE,
+            WEB_CENTER + (y - WEB_CENTER) * WEB_PULSE_SCALE,
+        )
+        for x, y in logo.glyph_points
+    )
+    return dataclasses.replace(
+        logo,
+        disc_radius=WEB_DISC_RADIUS,
+        glyph_points=points,
+        glyph_width=WEB_PULSE_STROKE * WEB_PULSE_SCALE,
+    )
+
+
+def pulse_inset(view_size: float) -> float:
+    # Negative inset: the web disc diameter (2 * WEB_DISC_RADIUS units) fills the whole canvas.
+    return (1.0 - view_size / (2.0 * WEB_DISC_RADIUS)) / 2.0
+
+
+def render_pulse_mask(logo: gen.Logo, size: int) -> bytes:
+    raw: bytes = gen.render_logo(
+        pulse_logo(logo),
+        size,
+        pulse_inset(logo.view_size),
+        BLACK,
+        gen.WHITE,
+    )
+    return brightness_mask(raw, size)
 
 
 def place_centered(square: bytes, diameter: int, width: int, height: int) -> bytes:
@@ -113,13 +156,7 @@ def generate(master_path: Path, out_dir: Path) -> List[Path]:
             written.append(target)
 
         qr_size: int = QR_SIZE * scale
-        qr_diameter: int = round(qr_size * QR_DISC_FRACTION)
-        qr_pixels: bytes = place_centered(
-            render_mask(logo, qr_diameter),
-            qr_diameter,
-            qr_size,
-            qr_size,
-        )
+        qr_pixels: bytes = render_pulse_mask(logo, qr_size)
         qr_target: Path = out_dir / f"{QR_NAME}{suffix}.png"
         qr_target.write_bytes(encode_png(qr_size, qr_size, qr_pixels))
         written.append(qr_target)

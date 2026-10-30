@@ -58,7 +58,7 @@ namespace {
 }
 
 [[nodiscard]] QColor QrActiveColor() {
-	return QColor(0x40, 0xA7, 0xE3); // Default windowBgActive.
+	return QColor(0x20, 0x85, 0xDF); // ImpulseM brand disc, as in the Android and web logo.
 }
 
 [[nodiscard]] not_null<Ui::RpWidget*> PrepareQrWidget(

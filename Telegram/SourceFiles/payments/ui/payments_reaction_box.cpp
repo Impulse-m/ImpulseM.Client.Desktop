@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/qt/qt_compare.h"
 #include "calls/group/ui/calls_group_stars_coloring.h"
+#include "core/impulse_build_links.h"
 #include "lang/lang_keys.h"
 #include "ui/boxes/boost_box.h" // MakeBoostFeaturesBadge.
 #include "ui/controls/who_reacted_context_action.h"
@@ -641,8 +642,8 @@ void PaidReactionsBox(
 				rpl::combine(
 					tr::lng_paid_react_agree_link(),
 					tr::lng_group_invite_subscription_about_url()
-				) | rpl::map([](const QString &text, const QString &url) {
-					return tr::link(text, url);
+				) | rpl::map([](const QString &text, const QString &path) {
+					return Impulse::BuildLinks::SiteLinkText(text, path);
 				}),
 				tr::rich)),
 		st::defaultBoxDividerLabelPadding,

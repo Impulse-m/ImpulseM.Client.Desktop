@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "core/application.h"
 #include "core/changelogs.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "core/update_channel.h"
 #include "core/update_keys.h"
@@ -2179,7 +2180,10 @@ bool checkReadyUpdate() {
 
 void UpdateApplication() {
 	if (UpdaterDisabled()) {
-		UrlClickHandler::Open(u"https://desktop.impulsem.net"_q);
+		const auto downloadUrl = Impulse::BuildLinks::SitePage(u"/dl"_q);
+		if (!downloadUrl.isEmpty()) {
+			UrlClickHandler::Open(downloadUrl);
+		}
 	} else {
 		cSetAutoUpdate(true);
 		const auto window = Core::IsAppLaunched()

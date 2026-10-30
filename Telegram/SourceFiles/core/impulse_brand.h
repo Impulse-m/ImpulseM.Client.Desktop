@@ -16,10 +16,6 @@ inline constexpr std::string_view BrandName = "ImpulseM Desktop";
 inline constexpr std::string_view BrandShortName = "ImpulseM";
 inline constexpr std::string_view BrandUpper = "IMPULSEM";
 
-// Used by tests and documentation only. No code reads it as a link prefix:
-// the prefix comes from help.getConfig (me_url_prefix).
-inline constexpr std::string_view LinkHost = "o.impulsem.net";
-
 inline constexpr std::int32_t ApiIdDesktop = 4;
 
 inline constexpr std::uint32_t PrimaryDay = 0xFF2085DF;

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "core/deep_links/deep_links_router.h"
+#include "core/impulse_build_links.h"
 
 #include "apiwrap.h"
 #include "base/binary_guard.h"
@@ -1737,7 +1738,11 @@ void RegisterSettingsHandlers(Router &router) {
 			if (!ImpulseFeatures::HELP_SECTION) {
 				return Result::Handled;
 			}
-			UrlClickHandler::Open(tr::lng_telegram_features_url(tr::now));
+			const auto url = Impulse::BuildLinks::LinkPage(
+				tr::lng_telegram_features_url(tr::now));
+			if (!url.isEmpty()) {
+				UrlClickHandler::Open(url);
+			}
 			return Result::Handled;
 		}},
 		.requiresAuth = false,

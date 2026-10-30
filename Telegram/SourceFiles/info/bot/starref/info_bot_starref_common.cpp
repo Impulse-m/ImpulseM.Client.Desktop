@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/replace_boost_box.h" // CreateUserpicsTransfer.
 #include "boxes/send_credits_box.h" // Ui::CreditsEmoji.
 #include "chat_helpers/stickers_lottie.h"
+#include "core/impulse_build_links.h"
 #include "core/ui_integration.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
@@ -699,8 +700,9 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 			button,
 			tr::lng_star_ref_one_join_text(
 				lt_terms,
-				tr::lng_star_ref_button_link(
-					tr::url(tr::lng_star_ref_tos_url(tr::now))),
+				Impulse::BuildLinks::SiteLinkText(
+					tr::lng_star_ref_button_link(tr::now),
+					tr::lng_star_ref_tos_url(tr::now)),
 				tr::marked));
 	});
 }

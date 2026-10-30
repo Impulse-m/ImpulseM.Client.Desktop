@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/star_gift_box.h"
 #include "boxes/username_box.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "core/impulse_features.h"
 #include "data/components/credits.h"
@@ -634,7 +635,11 @@ void BuildHelpSection(SectionBuilder &builder) {
 		.title = tr::lng_settings_features(),
 		.icon = { &st::menuIconEmojiObjects },
 		.onClick = [] {
-			UrlClickHandler::Open(tr::lng_telegram_features_url(tr::now));
+			const auto url = Impulse::BuildLinks::LinkPage(
+				tr::lng_telegram_features_url(tr::now));
+			if (!url.isEmpty()) {
+				UrlClickHandler::Open(url);
+			}
 		},
 		.keywords = { u"tips"_q, u"tutorial"_q },
 	});
@@ -898,7 +903,8 @@ void SetupValidatePhoneNumberSuggestion(
 			content,
 			tr::lng_settings_suggestion_phone_number_about(
 				lt_link,
-				tr::lng_collectible_learn_more(tr::url(
+				rpl::single(Impulse::BuildLinks::SiteLinkText(
+					tr::lng_collectible_learn_more(tr::now),
 					tr::lng_settings_suggestion_phone_number_about_link(
 						tr::now))),
 				tr::marked),
@@ -906,11 +912,15 @@ void SetupValidatePhoneNumberSuggestion(
 		st::boxRowPadding);
 	label->setClickHandlerFilter([=, weak = base::make_weak(controller)](
 			const auto &...) {
-		UrlClickHandler::Open(
-			tr::lng_settings_suggestion_phone_number_about_link(tr::now),
-			QVariant::fromValue(ClickHandlerContext{
-				.sessionWindow = weak,
-			}));
+		const auto url = Impulse::BuildLinks::SitePage(
+			tr::lng_settings_suggestion_phone_number_about_link(tr::now));
+		if (!url.isEmpty()) {
+			UrlClickHandler::Open(
+				url,
+				QVariant::fromValue(ClickHandlerContext{
+					.sessionWindow = weak,
+				}));
+		}
 		return false;
 	});
 
@@ -1218,8 +1228,13 @@ Type MainId() {
 }
 
 void OpenFaq(base::weak_ptr<Window::SessionController> weak) {
+	const auto url = Impulse::BuildLinks::SitePage(
+		tr::lng_settings_faq_link(tr::now));
+	if (url.isEmpty()) {
+		return;
+	}
 	UrlClickHandler::Open(
-		tr::lng_settings_faq_link(tr::now),
+		url,
 		QVariant::fromValue(ClickHandlerContext{
 			.sessionWindow = weak,
 		}));

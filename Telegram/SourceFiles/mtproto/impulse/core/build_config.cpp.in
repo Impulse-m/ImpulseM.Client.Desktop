@@ -1,0 +1,28 @@
+// Template of the generated build_config.cpp. CMake fills the @IMPULSEM_*@
+// values; the generated file is compiled into the Telegram and Updater targets
+// only, never listed as a source here. The accessors normalise the values once.
+#include "mtproto/impulse/core/build_config.h"
+
+namespace Impulse::BuildConfig {
+
+std::string_view RpcUrl() {
+	static const auto result = NormalizeUrl("@IMPULSEM_RPC_URL@");
+	return result;
+}
+
+std::string_view SiteUrl() {
+	static const auto result = NormalizeUrl("@IMPULSEM_SITE_URL@");
+	return result;
+}
+
+std::string_view LinkHost() {
+	static const auto result = NormalizeLinkHost("@IMPULSEM_LINK_HOST@");
+	return result;
+}
+
+std::string_view WebUrl() {
+	static const auto result = NormalizeUrl("@IMPULSEM_WEB_URL@");
+	return result;
+}
+
+} // namespace Impulse::BuildConfig

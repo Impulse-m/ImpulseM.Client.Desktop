@@ -54,8 +54,6 @@ void AboutBox(
 		SponsoredPhrases phrases,
 		const Data::SponsoredMessages::Details &details,
 		Data::SponsoredReportAction report) {
-	constexpr auto kUrl = "https://promote.impulsem.net"_cs;
-
 	box->setWidth(st::boxWideWidth);
 	box->setNoContentMargin(true);
 
@@ -236,7 +234,7 @@ void AboutBox(
 							rpl::single(arrow),
 							tr::rich
 						) | rpl::map([=](TextWithEntities t) {
-							return tr::link(std::move(t), kUrl.utf16());
+							return t;
 						}),
 						tr::rich),
 				st::channelEarnLearnDescription))->resizeToWidth(available);
@@ -307,9 +305,9 @@ void AboutBox(
 void ShowReportSponsoredBox(
 		std::shared_ptr<ChatHelpers::Show> show,
 		Data::SponsoredReportAction report) {
-	const auto guideLink = tr::link(
-		tr::lng_report_sponsored_reported_link(tr::now),
-		u"https://promote.impulsem.net/guidelines"_q);
+	const auto guideLink = TextWithEntities{
+		tr::lng_report_sponsored_reported_link(tr::now)
+	};
 
 	auto performRequest = [=](
 			const auto &repeatRequest,

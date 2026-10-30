@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "base/qt_signal_producer.h"
 #include "boxes/about_box.h"
+#include "core/impulse_build_links.h"
 #include "core/update_channel.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/premium_preview_box.h"
@@ -387,9 +388,10 @@ MainMenu::MainMenu(
 
 	parentResized();
 
-	_telegram->setMarkedText(tr::link(
-		u"ImpulseM Desktop"_q,
-		u"https://desktop.impulsem.net"_q));
+	_telegram->setMarkedText(
+		Impulse::BuildLinks::SiteLinkText(
+			u"ImpulseM Desktop"_q,
+			u"/dl"_q));
 	_telegram->setLinksTrusted();
 	// The canary version is too long for the "Version {version}" form.
 	_version->setMarkedText(

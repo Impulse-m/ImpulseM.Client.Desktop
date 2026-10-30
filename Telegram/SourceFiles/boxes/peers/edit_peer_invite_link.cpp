@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peer_list_controllers.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/ui_integration.h" // TextContext
 #include "data/components/credits.h"
 #include "data/data_changes.h"
@@ -924,7 +925,8 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 				box,
 				tr::lng_credits_box_out_about(
 					lt_link,
-					tr::lng_payments_terms_link(tr::url(
+					rpl::single(Impulse::BuildLinks::SiteLinkText(
+						tr::lng_payments_terms_link(tr::now),
 						tr::lng_credits_box_out_about_link(tr::now))),
 					tr::marked),
 				st::creditsBoxAboutDivider),

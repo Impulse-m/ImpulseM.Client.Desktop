@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "updater.h"
 
 #include "base/platform/win/base_windows_safe_library.h"
+#include "mtproto/impulse/core/build_config.h"
 
 #include <limits>
 #include <memory>
@@ -437,10 +438,13 @@ void updateRegistry() {
 								wsprintf(dateStr, L"%04d%02d%02d", stLocalTime.wYear, stLocalTime.wMonth, stLocalTime.wDay);
 								RegSetValueEx(rkey, L"InstallDate", 0, REG_SZ, (const BYTE*)dateStr, (wcslen(dateStr) + 1) * sizeof(WCHAR));
 
-								const WCHAR *appURL = L"https://desktop.impulsem.net";
-								RegSetValueEx(rkey, L"HelpLink", 0, REG_SZ, (const BYTE*)appURL, (wcslen(appURL) + 1) * sizeof(WCHAR));
-								RegSetValueEx(rkey, L"URLInfoAbout", 0, REG_SZ, (const BYTE*)appURL, (wcslen(appURL) + 1) * sizeof(WCHAR));
-								RegSetValueEx(rkey, L"URLUpdateInfo", 0, REG_SZ, (const BYTE*)appURL, (wcslen(appURL) + 1) * sizeof(WCHAR));
+								const auto siteUrl = Impulse::BuildConfig::SiteUrl();
+								if (!siteUrl.empty()) {
+									const wstring appURL = wstring(siteUrl.begin(), siteUrl.end()) + L"/dl";
+									RegSetValueEx(rkey, L"HelpLink", 0, REG_SZ, (const BYTE*)appURL.c_str(), (appURL.size() + 1) * sizeof(WCHAR));
+									RegSetValueEx(rkey, L"URLInfoAbout", 0, REG_SZ, (const BYTE*)appURL.c_str(), (appURL.size() + 1) * sizeof(WCHAR));
+									RegSetValueEx(rkey, L"URLUpdateInfo", 0, REG_SZ, (const BYTE*)appURL.c_str(), (appURL.size() + 1) * sizeof(WCHAR));
+								}
 							}
 						}
 					}

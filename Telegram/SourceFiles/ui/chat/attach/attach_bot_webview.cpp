@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "core/file_utilities.h"
+#include "core/impulse_build_links.h"
 #include "core/local_url_handlers.h"
 #include "core/shortcuts.h"
 #include "webview/webview_embed.h"
@@ -1708,7 +1709,11 @@ bool Panel::showWebview(Args &&args, const Webview::ThemeParams &params) {
 			}
 		},
 		.terms = [=] {
-			File::OpenUrl(tr::lng_mini_apps_tos_url(tr::now));
+			const auto url = Impulse::BuildLinks::SitePage(
+				tr::lng_mini_apps_tos_url(tr::now));
+			if (!url.isEmpty()) {
+				File::OpenUrl(url);
+			}
 		},
 		.privacy = [=] {
 			_delegate->botOpenPrivacyPolicy();
@@ -2028,7 +2033,11 @@ void Panel::handleExternalShellMenuAction(const QString &id) {
 			}
 		},
 		.terms = [=] {
-			File::OpenUrl(tr::lng_mini_apps_tos_url(tr::now));
+			const auto url = Impulse::BuildLinks::SitePage(
+				tr::lng_mini_apps_tos_url(tr::now));
+			if (!url.isEmpty()) {
+				File::OpenUrl(url);
+			}
 		},
 		.privacy = [=] {
 			_delegate->botOpenPrivacyPolicy();

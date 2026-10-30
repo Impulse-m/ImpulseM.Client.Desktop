@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "export/output/export_output_html.h"
 
+#include "core/impulse_build_links.h"
 #include "core/utils.h"
 #include "countries/countries_instance.h"
 #include "export/data/export_data_types.h"
@@ -217,7 +218,11 @@ QByteArray SerializeList(const std::vector<QByteArray> &values) {
 }
 
 QByteArray MakeLinks(const QByteArray &value) {
-	const auto domain = QByteArray("https://impulsem.net/");
+	const auto siteRoot = Impulse::BuildLinks::SitePage(u"/"_q);
+	if (siteRoot.isEmpty()) {
+		return value;
+	}
+	const auto domain = siteRoot.toUtf8();
 	auto result = QByteArray();
 	auto offset = 0;
 	while (true) {

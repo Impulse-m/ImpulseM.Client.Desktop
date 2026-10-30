@@ -234,7 +234,11 @@ jobs:
             echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
           fi
 
-          cmake -Bbuild . -DTDESKTOP_API_TEST=ON $DEFINE
+          cmake -Bbuild . -DTDESKTOP_API_TEST=ON $DEFINE \
+          -D IMPULSEM_RPC_URL=${{ vars.IMPULSEM_RPC_URL }} \
+          -D IMPULSEM_SITE_URL=${{ vars.IMPULSEM_SITE_URL }} \
+          -D IMPULSEM_LINK_HOST=${{ vars.IMPULSEM_LINK_HOST }} \
+          -D IMPULSEM_WEB_URL=${{ vars.IMPULSEM_WEB_URL }}
           cmake --build build
           macdeployqt build/Telegram.app
           codesign --remove-signature build/Telegram.app

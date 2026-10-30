@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/unread_badge_paint.h"
 #include "ui/ui_utility.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "core/core_settings.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
@@ -618,7 +619,10 @@ void SetupRows(
 		tr::lng_settings_username_label(),
 		std::move(empty)
 	) | rpl::map([](const QString &label, bool empty) {
-		return empty ? "o.impulsem.net/username" : label;
+		const auto linkHost = Impulse::BuildLinks::LinkHost();
+		return (empty && !linkHost.isEmpty())
+			? (linkHost + u"/username"_q)
+			: label;
 	});
 	auto usernameValue = rpl::combine(
 		std::move(username),
@@ -1201,7 +1205,7 @@ void BuildInformationSection(SectionBuilder &builder) {
 		return SearchEntry{
 			.id = u"edit/username"_q,
 			.title = tr::lng_settings_username_label(tr::now),
-			.keywords = { u"username"_q, u"link"_q, u"o.impulsem.net"_q },
+			.keywords = { u"username"_q, u"link"_q },
 		};
 	});
 	builder.add(nullptr, [] {

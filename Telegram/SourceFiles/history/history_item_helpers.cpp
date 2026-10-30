@@ -45,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h" // ClickHandlerContext.
 #include "settings/settings_credits_graphics.h"
 #include "storage/storage_account.h"
@@ -1455,10 +1456,14 @@ bool CanHoldItemNotification(not_null<const HistoryItem*> item) {
 }
 
 [[nodiscard]] TextWithEntities UnsupportedMessageText() {
-	const auto siteLink = u"https://desktop.impulsem.net"_q;
-	auto result = TextWithEntities{
-		tr::lng_message_unsupported(tr::now, lt_link, siteLink)
-	};
+	const auto siteLink = Impulse::BuildLinks::SitePage(u"/dl"_q);
+	auto result = siteLink.isEmpty()
+		? TextWithEntities{
+			tr::lng_unsupported_message_text(tr::now)
+		}
+		: TextWithEntities{
+			tr::lng_message_unsupported(tr::now, lt_link, siteLink)
+		};
 	TextUtilities::ParseEntities(result, Ui::ItemTextNoMonoOptions().flags);
 	result.entities.push_front(
 		EntityInText(EntityType::Italic, 0, result.text.size()));

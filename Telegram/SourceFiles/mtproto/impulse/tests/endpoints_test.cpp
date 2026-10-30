@@ -3,22 +3,32 @@
 
 #include <string>
 
-IMPULSE_TEST(EndpointsFixedUrls) {
-	IMPULSE_CHECK(Impulse::Endpoints::kRpcBase == "https://rpc.impulsem.io");
-	IMPULSE_CHECK(Impulse::Endpoints::kUpdateUrl
-		== "wss://rpc.impulsem.io/connection/websocket?cf_ws_frame_ping_pong=true");
-	IMPULSE_CHECK(Impulse::Endpoints::kPoolUrl
-		== "wss://rpc.impulsem.io/pool/connection/websocket"
+IMPULSE_TEST(EndpointsDerivedFromRpcBase) {
+	IMPULSE_CHECK(Impulse::Endpoints::UpdateUrl("https://rpc.example.org")
+		== "wss://rpc.example.org/connection/websocket?cf_ws_frame_ping_pong=true");
+	IMPULSE_CHECK(Impulse::Endpoints::PoolUrl("https://rpc.example.org")
+		== "wss://rpc.example.org/pool/connection/websocket"
 		"?cf_protocol=protobuf&cf_ws_frame_ping_pong=true");
+	IMPULSE_CHECK(Impulse::Endpoints::UpdateUrl("https://rpc.example.org/")
+		== "wss://rpc.example.org/connection/websocket?cf_ws_frame_ping_pong=true");
+	IMPULSE_CHECK(Impulse::Endpoints::UpdateUrl("http://127.0.0.1:8080")
+		== "ws://127.0.0.1:8080/connection/websocket?cf_ws_frame_ping_pong=true");
+}
+
+IMPULSE_TEST(EndpointsEmptyRpcBaseGivesNoEndpoint) {
+	IMPULSE_CHECK(Impulse::Endpoints::UpdateUrl("").empty());
+	IMPULSE_CHECK(Impulse::Endpoints::PoolUrl("").empty());
+	IMPULSE_CHECK(Impulse::Endpoints::UpdateUrl("rpc.example.org").empty());
+	IMPULSE_CHECK(Impulse::Endpoints::PoolUrl("https://").empty());
 }
 
 IMPULSE_TEST(EndpointsMediaUrlHostname) {
 	const std::optional<std::string> url = Impulse::Endpoints::MediaUrl(
-		"media.impulsem.io",
+		"media.example.org",
 		443);
 	IMPULSE_CHECK(url.has_value());
 	IMPULSE_CHECK(*url
-		== "wss://media.impulsem.io:443/connection/websocket"
+		== "wss://media.example.org:443/connection/websocket"
 		"?cf_protocol=protobuf&cf_ws_frame_ping_pong=true");
 }
 
@@ -55,8 +65,8 @@ IMPULSE_TEST(EndpointsMediaUrlAlreadyBracketedIpv6NotDoubled) {
 IMPULSE_TEST(EndpointsMediaUrlRejectsBadInput) {
 	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("", 443).has_value());
 	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("[]", 443).has_value());
-	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("media.impulsem.io", 0).has_value());
-	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("media.impulsem.io", 65536).has_value());
+	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("media.example.org", 0).has_value());
+	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("media.example.org", 65536).has_value());
 	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("evil.example/path", 443).has_value());
 	IMPULSE_CHECK(!Impulse::Endpoints::MediaUrl("host@evil.example", 443).has_value());
 }

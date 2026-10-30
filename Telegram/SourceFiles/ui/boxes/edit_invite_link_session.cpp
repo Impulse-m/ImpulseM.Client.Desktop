@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/boxes/edit_invite_link_session.h"
 
+#include "core/impulse_build_links.h"
 #include "core/ui_integration.h" // TextContext
 #include "data/components/credits.h"
 #include "data/data_peer.h"
@@ -136,9 +137,11 @@ InviteLinkSubscriptionToggle FillCreateInviteLinkSubscriptionToggle(
 				rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
 				tr::rich
 			) | rpl::map([](TextWithEntities text) {
-				return tr::link(
-					std::move(text),
+				const auto url = Impulse::BuildLinks::SitePage(
 					tr::lng_group_invite_subscription_about_url(tr::now));
+				return url.isEmpty()
+					? text
+					: tr::link(std::move(text), url);
 			}),
 			tr::rich),
 		st::boxDividerLabel);

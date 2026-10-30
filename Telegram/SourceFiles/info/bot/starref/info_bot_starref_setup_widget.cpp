@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer_rpl.h"
 #include "base/unixtime.h"
 #include "core/click_handler_types.h"
+#include "core/impulse_build_links.h"
 #include "data/data_user.h"
 #include "info/bot/starref/info_bot_starref_common.h"
 #include "info/bot/starref/info_bot_starref_join_widget.h"
@@ -1022,8 +1023,9 @@ std::unique_ptr<Ui::RpWidget> Widget::setupBottom() {
 				? tr::lng_star_ref_update_info
 				: tr::lng_star_ref_start_info)(
 					lt_terms,
-					tr::lng_star_ref_button_link(
-						tr::url(tr::lng_star_ref_tos_url(tr::now))),
+					Impulse::BuildLinks::SiteLinkText(
+						tr::lng_star_ref_button_link(tr::now),
+						tr::lng_star_ref_tos_url(tr::now)),
 					tr::marked),
 			st::boxDividerLabel),
 		QMargins(margins.left(), 0, margins.right(), 0));

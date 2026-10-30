@@ -1,5 +1,6 @@
 #include "mtproto/impulse/glue/centrifuge_client.h"
 
+#include "mtproto/impulse/core/build_config.h"
 #include "mtproto/impulse/core/endpoints.h"
 #include "mtproto/impulse/glue/connection_state_host.h"
 
@@ -44,8 +45,14 @@ std::int32_t CentrifugeClient::create(
 	}
 
 	const bool updateFleet = (fleetKind == CentrifugeFleet::Update);
-	config.endpointUrl = std::string(
-		updateFleet ? Endpoints::kUpdateUrl : Endpoints::kPoolUrl);
+	const std::string_view rpcBase = BuildConfig::RpcUrl();
+	config.endpointUrl = updateFleet
+		? Endpoints::UpdateUrl(rpcBase)
+		: Endpoints::PoolUrl(rpcBase);
+	if (config.endpointUrl.empty()) {
+		// No transport host is configured: the socket is never created.
+		return kCentrifugoStatusConfigurationError;
+	}
 	config.websocketSubprotocol = updateFleet;
 
 	std::unique_ptr<CentrifugoRust> client = std::make_unique<CentrifugoRust>();

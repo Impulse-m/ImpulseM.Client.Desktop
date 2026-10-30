@@ -58,7 +58,7 @@ exit /b %ErrorCode%
 :build
 cd "%HomePath%"
 
-call configure.bat -DTDESKTOP_API_ID=%IMPULSEM_API_ID% -DTDESKTOP_API_HASH=%IMPULSEM_API_HASH% -DDESKTOP_APP_ENABLE_LTO=ON -DDESKTOP_APP_DISABLE_AUTOUPDATE=ON -DDESKTOP_APP_DISABLE_CRASH_REPORTS=ON || goto error
+call configure.bat -DTDESKTOP_API_ID=%IMPULSEM_API_ID% -DTDESKTOP_API_HASH=%IMPULSEM_API_HASH% -DIMPULSEM_RPC_URL=%IMPULSEM_RPC_URL% -DIMPULSEM_SITE_URL=%IMPULSEM_SITE_URL% -DIMPULSEM_LINK_HOST=%IMPULSEM_LINK_HOST% -DIMPULSEM_WEB_URL=%IMPULSEM_WEB_URL% -DDESKTOP_APP_ENABLE_LTO=ON -DDESKTOP_APP_DISABLE_AUTOUPDATE=ON -DDESKTOP_APP_DISABLE_CRASH_REPORTS=ON || goto error
 
 cd "%SolutionPath%"
 call cmake --build . --config Release --target Telegram || goto error
@@ -71,7 +71,7 @@ cd "%ReleasePath%"
 
 call "%FullScriptPath%sign_windows.bat" "%BinaryName%.exe" || goto error
 
-iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=win64" "/dMyOutputBaseFilename=%SetupBaseName%" "%FullScriptPath%setup.iss" || goto error
+iscc /dMyAppVersion=%AppVersionStrSmall% /dMyAppVersionZero=%AppVersionStr% /dMyAppVersionFull=%AppVersionStrFull% "/dReleasePath=%ReleasePath%" "/dMyBuildTarget=win64" "/dMyOutputBaseFilename=%SetupBaseName%" "/dMyAppURL=%IMPULSEM_SITE_URL%" "%FullScriptPath%setup.iss" || goto error
 if not exist "%SetupFile%" goto error
 
 call "%FullScriptPath%sign_windows.bat" "%SetupFile%" || goto error

@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers_lottie.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "core/local_url_handlers.h"
 #include "core/shortcuts.h"
@@ -367,7 +368,7 @@ void FillDisclaimerBox(
 			box.get(),
 			tr::lng_mini_apps_disclaimer_button(
 				lt_link,
-				rpl::single(tr::link(
+				rpl::single(Impulse::BuildLinks::SiteLinkText(
 					tr::lng_mini_apps_disclaimer_link(tr::now),
 					tr::lng_mini_apps_tos_url(tr::now))),
 				tr::marked),
@@ -1141,7 +1142,7 @@ void WebViewInstance::confirmOpen(Fn<void()> done, bool forceConfirmation) {
 			.text = tr::lng_profile_open_app_about(
 				tr::now,
 				lt_terms,
-				tr::link(
+				Impulse::BuildLinks::SiteLinkText(
 					tr::lng_profile_open_app_terms(tr::now),
 					tr::lng_mini_apps_tos_url(tr::now)),
 				tr::rich),
@@ -1179,7 +1180,7 @@ void WebViewInstance::confirmAppOpen(
 			tr::lng_profile_open_app_about(
 				tr::now,
 				lt_terms,
-				tr::link(
+				Impulse::BuildLinks::SiteLinkText(
 					tr::lng_profile_open_app_terms(tr::now),
 					tr::lng_mini_apps_tos_url(tr::now)),
 				tr::rich),
@@ -2376,7 +2377,11 @@ void WebViewInstance::botOpenPrivacyPolicy() {
 		}
 	}
 	if (!sendCommand()) {
-		openUrl(tr::lng_profile_bot_privacy_url(tr::now));
+		const auto url = Impulse::BuildLinks::SitePage(
+			tr::lng_profile_bot_privacy_url(tr::now));
+		if (!url.isEmpty()) {
+			openUrl(url);
+		}
 	}
 }
 

@@ -1,4 +1,4 @@
-# Telegram Desktop task-test harness
+# ImpulseM Desktop task-test harness
 
 This directory contains the permanent Debug-only infrastructure used by
 `perform-task` overlays. Read this catalog before designing or recovering a
@@ -67,7 +67,7 @@ chats gates.
 
 ## Exact objects and actions
 
-Telegram custom widgets generally do not declare `Q_OBJECT`. Never call
+Custom widgets of this client generally do not declare `Q_OBJECT`. Never call
 `findChildren<Ui::CustomWidget*>()`; Qt may return unrelated widgets blindly
 cast to that type. `FindAll<T>`, `FindFirst<T>`, and `FindVisible<T>` enumerate
 real `QWidget` descendants and apply C++ RTTI safely.

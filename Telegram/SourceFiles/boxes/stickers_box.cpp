@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/timer.h"
 #include "boxes/peers/edit_peer_color_box.h"
+#include "core/impulse_build_links.h"
 #include "boxes/sticker_set_box.h"
 #include "chat_helpers/compose/compose_show.h"
 #include "chat_helpers/stickers_lottie.h"
@@ -2309,7 +2310,7 @@ void StickersBox::Inner::AddressField::correctValue(
 		int &nowCursor) {
 	auto newText = now;
 	auto newCursor = nowCursor;
-	auto removeFromBeginning = {
+	auto removeFromBeginning = std::vector<QString>{
 		u"http://"_q,
 		u"https://"_q,
 		u"www.t.me/"_q,
@@ -2318,9 +2319,12 @@ void StickersBox::Inner::AddressField::correctValue(
 		u"t.me/"_q,
 		u"telegram.me/"_q,
 		u"telegram.dog/"_q,
-		u"o.impulsem.net/"_q,
 		u"addstickers/"_q,
 	};
+	const auto linkHost = Impulse::BuildLinks::LinkHost();
+	if (!linkHost.isEmpty()) {
+		removeFromBeginning.push_back(linkHost + u"/"_q);
+	}
 	for (const auto &removePhrase : removeFromBeginning) {
 		if (newText.startsWith(removePhrase)) {
 			newText = newText.mid(removePhrase.size());

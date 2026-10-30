@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 
 #include "base/unixtime.h"
+#include "core/impulse_build_links.h"
 #include "lang/lang_keys.h"
 #include "chat_helpers/bot_command.h"
 #include "core/application.h"
@@ -123,7 +124,7 @@ constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 }
 
 [[nodiscard]] std::vector<QString> DefaultWhitelistedDomains() {
-	return {
+	auto result = std::vector<QString>{
 		u"telegram.dog"_q,
 		u"telegram.me"_q,
 		u"telegram.org"_q,
@@ -133,10 +134,14 @@ constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 		u"graph.org"_q,
 		u"telesco.pe"_q,
 		u"fragment.com"_q,
-		u"impulsem.net"_q,
-		u"o.impulsem.net"_q,
-		u"p.impulsem.net"_q,
 	};
+	// Hosts of the build variables: the website and the public share links.
+	for (const auto &host : { Impulse::BuildLinks::SiteHost(), Impulse::BuildLinks::LinkHost() }) {
+		if (!host.isEmpty()) {
+			result.push_back(host);
+		}
+	}
+	return result;
 }
 
 [[nodiscard]] std::vector<QString> WhitelistedDomains(
@@ -184,20 +189,22 @@ constexpr auto kReminderSetToastDuration = 4 * crl::time(1000);
 		});
 }
 
-[[nodiscard]] bool IsTelegramShortLinkHost(const QUrl &url) {
+[[nodiscard]] bool IsShortLinkHost(const QUrl &url) {
 	using namespace qthelp;
 
+	const auto linkHost = Impulse::BuildLinks::LinkHost();
 	return regex_match(
-		"(^|\\.)(telegram\\.(me|dog)|t\\.me|o\\.impulsem\\.net)$",
+		"(^|\\.)(telegram\\.(me|dog)|t\\.me)$",
 		url.host(),
-		RegExOption::CaseInsensitive).valid();
+		RegExOption::CaseInsensitive).valid()
+		|| (!linkHost.isEmpty() && HostInDomains(url.host(), { linkHost }));
 }
 
 [[nodiscard]] bool HiddenUrlRequiresConfirmation(
 		const QUrl &url,
 		const ClickHandlerContext &my) {
 	return !HostInDomains(url.host(), WhitelistedDomains(my))
-		|| IsTelegramShortLinkHost(url);
+		|| IsShortLinkHost(url);
 }
 
 [[nodiscard]] bool IsWebAuthTokenPart(QStringView part) {
@@ -327,6 +334,8 @@ void ExportToCalendar(TimeId date, const QString &messageText) {
 	description.replace(',', u"\\,"_q);
 	description.replace('\n', u"\\n"_q);
 	const auto uid = base::RandomValue<uint64>();
+	const auto siteHost = Impulse::BuildLinks::SiteHost();
+	const auto uidHost = siteHost.isEmpty() ? u"localhost"_q : siteHost;
 	const auto content = u"BEGIN:VCALENDAR\r\n"
 		"VERSION:2.0\r\n"
 		"PRODID:-//ImpulseM Desktop//EN\r\n"
@@ -334,7 +343,7 @@ void ExportToCalendar(TimeId date, const QString &messageText) {
 		"DTSTART:%1\r\n"
 		"DTEND:%2\r\n"
 		"DTSTAMP:%3\r\n"
-		"UID:telegram-%4-%7@impulsem.net\r\n"
+		"UID:telegram-%4-%7@%8\r\n"
 		"SUMMARY:%5\r\n"
 		"DESCRIPTION:%6\r\n"
 		"END:VEVENT\r\n"
@@ -345,7 +354,8 @@ void ExportToCalendar(TimeId date, const QString &messageText) {
 			.arg(date)
 			.arg(summary)
 			.arg(description)
-			.arg(uid, 0, 16);
+			.arg(uid, 0, 16)
+			.arg(uidHost);
 	const auto dir = cWorkingDir() + u"tdata/temp"_q;
 	QDir().mkpath(dir);
 	const auto path = u"%1/event_%2.ics"_q

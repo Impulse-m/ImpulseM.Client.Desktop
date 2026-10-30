@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_invite_link.h" // InviteLinkQrBox.
 #include "boxes/peer_list_box.h"
 #include "boxes/premium_limits_box.h"
+#include "core/impulse_build_links.h"
 #include "core/ui_integration.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
@@ -262,6 +263,11 @@ QString LinkRow::generateName() {
 		return _data.title;
 	}
 	auto result = _data.url;
+	const auto linkHost = Impulse::BuildLinks::LinkHost();
+	if (!linkHost.isEmpty()) {
+		result.replace(linkHost + u"/+"_q, QString());
+		result.replace(linkHost + u"/joinchat/"_q, QString());
+	}
 	return result.replace(
 		u"https://"_q,
 		QString()
@@ -270,12 +276,6 @@ QString LinkRow::generateName() {
 		QString()
 	).replace(
 		u"t.me/joinchat/"_q,
-		QString()
-	).replace(
-		u"o.impulsem.net/+"_q,
-		QString()
-	).replace(
-		u"o.impulsem.net/joinchat/"_q,
 		QString()
 	);
 }

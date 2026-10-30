@@ -3,6 +3,7 @@
 // it needs the network and the Rust archive. It dials the update fleet directly.
 #ifdef IMPULSE_CENTRIFUGO_SMOKE
 
+#include "mtproto/impulse/core/endpoints.h"
 #include "mtproto/impulse/glue/centrifugo_rust.h"
 #include "mtproto/impulse/tests/impulse_test.h"
 
@@ -10,6 +11,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -53,7 +55,8 @@ IMPULSE_TEST(CentrifugoRustSmoke) {
 	bool finished = false;
 
 	CentrifugoConfig config;
-	config.endpointUrl = "wss://rpc.impulsem.io/connection/websocket?cf_ws_frame_ping_pong=true";
+	const char *rpcBase = std::getenv("IMPULSEM_RPC_URL");
+	config.endpointUrl = Impulse::Endpoints::UpdateUrl(rpcBase ? rpcBase : "");
 	config.websocketSubprotocol = true;
 
 	const std::int32_t created = client.create(

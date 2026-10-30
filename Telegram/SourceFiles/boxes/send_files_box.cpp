@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/history_view_schedule_box.h"
+#include "core/impulse_build_links.h"
 #include "core/mime_type.h"
 #include "core/shortcuts.h"
 #include "core/ui_integration.h"
@@ -325,19 +326,27 @@ void EditPriceBox(
 	box->setFocusCallback([=] {
 		field->setFocusFast();
 	});
+	const auto hasAboutLink = !tr::lng_paid_about_link_url(tr::now).isEmpty();
 	const auto about = box->addRow(
 		object_ptr<Ui::FlatLabel>(
 			box,
 			tr::lng_paid_about(
 				lt_link,
-				tr::lng_paid_about_link(tr::link),
+				tr::lng_paid_about_link(
+					tr::link
+				) | rpl::map([=](TextWithEntities text) {
+					return hasAboutLink
+						? text
+						: TextWithEntities{ tr::lng_paid_about_link(tr::now) };
+				}),
 				tr::marked),
 			st::paidAmountAbout),
 		st::boxRowPadding + QMargins(0, st::sendMediaRowSkip, 0, 0));
 	about->setClickHandlerFilter([=](const auto &...) {
-		Core::App().iv().openWithIvPreferred(
-			session,
-			tr::lng_paid_about_link_url(tr::now));
+		const auto url = tr::lng_paid_about_link_url(tr::now);
+		if (!url.isEmpty()) {
+			Core::App().iv().openWithIvPreferred(session, url);
+		}
 		return false;
 	});
 

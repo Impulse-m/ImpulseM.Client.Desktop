@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/star_gift_box.h"
 #include "boxes/translate_box.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
 #include "data/business/data_business_common.h"
@@ -2284,7 +2285,9 @@ void DetailsFiller::addMainApp(not_null<UserData*> user) {
 	auto textProducer = rpl::combine(
 		tr::lng_profile_open_app_about(
 			lt_terms,
-			tr::lng_profile_open_app_terms(tr::url(url)),
+			rpl::single(Impulse::BuildLinks::SiteLinkText(
+				tr::lng_profile_open_app_terms(tr::now),
+				url)),
 			tr::marked),
 		user->session().changes().peerFlagsValue(
 			user,
@@ -3084,7 +3087,11 @@ void ActionsFiller::addBotCommandActions(not_null<UserData*> user) {
 			}
 		}
 		if (!sendBotCommand(u"privacy"_q)) {
-			openUrl(tr::lng_profile_bot_privacy_url(tr::now));
+			const auto url = Impulse::BuildLinks::SitePage(
+				tr::lng_profile_bot_privacy_url(tr::now));
+			if (!url.isEmpty()) {
+				openUrl(url);
+			}
 		}
 	};
 	AddActionButton(

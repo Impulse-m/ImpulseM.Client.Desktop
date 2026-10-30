@@ -6,13 +6,13 @@ Choose a folder for the future build, for example **/home/user/TBuild**. It will
 
 ### Obtain your API credentials
 
-You will require **api_id** and **api_hash** to access the Telegram API servers. To learn how to obtain them [click here][api_credentials].
+You will require **api_id** and **api_hash** to access the API servers. To learn how to obtain them [click here][api_credentials].
 
 ### Clone source code and prepare libraries
 
 Install [poetry](https://python-poetry.org), go to ***BuildPath*** and run
 
-    git clone --recursive https://github.com/telegramdesktop/tdesktop.git
+    git clone --recursive https://github.com/Impulse-m/ImpulseM.Client.Desktop.git tdesktop
     ./tdesktop/Telegram/build/prepare/linux.sh
 
 ### Building the project
@@ -25,7 +25,8 @@ Go to ***BuildPath*/tdesktop** and run (using [your **api_id** and **api_hash**]
         tdesktop:centos_env \
         /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
         -D TDESKTOP_API_ID=YOUR_API_ID \
-        -D TDESKTOP_API_HASH=YOUR_API_HASH
+        -D TDESKTOP_API_HASH=YOUR_API_HASH \
+        -D IMPULSEM_RPC_URL=YOUR_RPC_URL
 
 Or, to create a debug build, run (also using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
 
@@ -36,7 +37,10 @@ Or, to create a debug build, run (also using [your **api_id** and **api_hash**](
         tdesktop:centos_env \
         /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
         -D TDESKTOP_API_ID=YOUR_API_ID \
-        -D TDESKTOP_API_HASH=YOUR_API_HASH
+        -D TDESKTOP_API_HASH=YOUR_API_HASH \
+        -D IMPULSEM_RPC_URL=YOUR_RPC_URL
+
+Replace `YOUR_RPC_URL` with the base URL of the transport host. The other build variables (`IMPULSEM_SITE_URL`, `IMPULSEM_LINK_HOST`, `IMPULSEM_WEB_URL`) are listed in the [build variables](../README.md#build-variables) section of the README and are passed the same way.
 
 The built files will be in the `out` directory.
 
@@ -49,7 +53,8 @@ Open the repository in Visual Studio Code, install the [Dev Containers](https://
     {
         "cmake.configureSettings": {
             "TDESKTOP_API_ID": "YOUR_API_ID",
-            "TDESKTOP_API_HASH": "YOUR_API_HASH"
+            "TDESKTOP_API_HASH": "YOUR_API_HASH",
+            "IMPULSEM_RPC_URL": "YOUR_RPC_URL"
         }
     }
 

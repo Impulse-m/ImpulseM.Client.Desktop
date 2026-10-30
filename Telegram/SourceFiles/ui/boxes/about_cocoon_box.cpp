@@ -229,6 +229,9 @@ struct CocoonLinkInfo {
 
 [[nodiscard]] CocoonLinkInfo CocoonDirect() {
 	const auto text = tr::lng_translate_cocoon_text_link(tr::now);
+	if (text.isEmpty()) {
+		return { text, QString() };
+	}
 	const auto link = u"https://"_q + text;
 	return { text, link };
 }
@@ -280,19 +283,21 @@ void AboutCocoonBox(not_null<Ui::GenericBox*> box) {
 		margin = {};
 	}
 
-	box->addRow(
-		object_ptr<Ui::PlainShadow>(box),
-		st::cocoonJoinSeparatorPadding);
+	if (!direct.link.isEmpty()) {
+		box->addRow(
+			object_ptr<Ui::PlainShadow>(box),
+			st::cocoonJoinSeparatorPadding);
 
-	box->addRow(
-		object_ptr<Ui::FlatLabel>(
-			box,
-			tr::lng_translate_cocoon_text(
-				lt_link,
-				rpl::single(tr::link(direct.text, direct.link)),
-				tr::rich),
-			st::cocoonJoinLabel),
-		style::al_top);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				tr::lng_translate_cocoon_text(
+					lt_link,
+					rpl::single(tr::link(direct.text, direct.link)),
+					tr::rich),
+				st::cocoonJoinLabel),
+			style::al_top);
+	}
 
 	box->addButton(rpl::single(QString()), [=] {
 		box->closeBox();

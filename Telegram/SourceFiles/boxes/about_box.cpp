@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
+#include "core/impulse_build_links.h"
 #include "core/update_channel.h"
 #include "core/update_checker.h"
 #include "core/version.h"
@@ -38,7 +39,7 @@ namespace {
 rpl::producer<TextWithEntities> Text1() {
 	return tr::lng_about_text1(
 		lt_api_link,
-		tr::lng_about_text1_api(tr::url(u"https://core.impulsem.net/api"_q)),
+		rpl::single(TextWithEntities{ tr::lng_about_text1_api(tr::now) }),
 		tr::marked);
 }
 
@@ -58,7 +59,9 @@ rpl::producer<TextWithEntities> Text2() {
 rpl::producer<TextWithEntities> Text3() {
 	return tr::lng_about_text3(
 		lt_faq_link,
-		tr::lng_about_text3_faq(tr::url(telegramFaqLink())),
+		rpl::single(Impulse::BuildLinks::SiteLinkText(
+			tr::lng_about_text3_faq(tr::now),
+			u"/faq"_q)),
 		tr::marked);
 }
 
@@ -103,10 +106,6 @@ void AboutBox(not_null<Ui::GenericBox*> box) {
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 
 	box->setWidth(st::aboutWidth);
-}
-
-QString telegramFaqLink() {
-	return u"https://impulsem.net/faq"_q;
 }
 
 namespace {

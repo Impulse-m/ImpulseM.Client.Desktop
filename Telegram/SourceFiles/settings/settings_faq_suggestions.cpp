@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_faq_suggestions.h"
 
 #include "apiwrap.h"
+#include "core/impulse_build_links.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 
@@ -81,7 +82,11 @@ void FaqSuggestions::request() {
 	if (_loaded.current() || _requestId) {
 		return;
 	}
-	auto link = tr::lng_settings_faq_link(tr::now);
+	auto link = Impulse::BuildLinks::SitePage(
+		tr::lng_settings_faq_link(tr::now));
+	if (link.isEmpty()) {
+		return;
+	}
 	const auto hash = link.indexOf('#');
 	const auto url = (hash > 0) ? link.mid(0, hash) : link;
 

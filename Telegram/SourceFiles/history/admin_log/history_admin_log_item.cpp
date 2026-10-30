@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/sticker_set_box.h"
 #include "base/unixtime.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "main/main_session.h"
 #include "window/notifications_manager.h"
@@ -454,16 +455,21 @@ QString InternalInviteLinkUrl(const MTPExportedChatInvite &data) {
 
 QString GenerateInviteLinkText(const MTPExportedChatInvite &data) {
 	const auto label = ExtractInviteLinkLabel(data);
-	return label.isEmpty() ? ExtractInviteLink(data).replace(
+	if (!label.isEmpty()) {
+		return label;
+	}
+	auto result = ExtractInviteLink(data);
+	const auto linkHost = Impulse::BuildLinks::LinkHost();
+	if (!linkHost.isEmpty()) {
+		result.replace(linkHost + u"/joinchat/"_q, QString());
+	}
+	return result.replace(
 		u"https://"_q,
 		QString()
 	).replace(
 		u"t.me/joinchat/"_q,
 		QString()
-	).replace(
-		u"o.impulsem.net/joinchat/"_q,
-		QString()
-	) : label;
+	);
 }
 
 TextWithEntities GenerateInviteLinkLink(const MTPExportedChatInvite &data) {

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_report_window.h"
 
 #include "core/crash_reports.h"
+#include "core/impulse_build_links.h"
 #include "core/application.h"
 #include "core/sandbox.h"
 #include "core/update_checker.h"
@@ -31,6 +32,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kDefaultProxyPort = 80;
+
+// The get-app button is shown only when the website download page is configured.
+[[nodiscard]] bool HasDownloadLink() {
+	return !Impulse::BuildLinks::SitePage(u"/dl"_q).isEmpty();
+}
 
 } // namespace
 
@@ -486,7 +492,10 @@ LastCrashedWindow::LastCrashedWindow(
 	connect(&_saveReport, &QPushButton::clicked, [=] { saveReport(); });
 	_getApp.setText(u"GET THE LATEST OFFICIAL VERSION OF TELEGRAM DESKTOP"_q);
 	connect(&_getApp, &QPushButton::clicked, [=] {
-		QDesktopServices::openUrl(u"https://desktop.impulsem.net"_q);
+		const auto downloadUrl = Impulse::BuildLinks::SitePage(u"/dl"_q);
+		if (!downloadUrl.isEmpty()) {
+			QDesktopServices::openUrl(downloadUrl);
+		}
 	});
 
 	_send.setText(u"SEND CRASH REPORT"_q);
@@ -764,8 +773,12 @@ void LastCrashedWindow::updateControls() {
 						QString verStr = getReportField(qstr("version"), qstr("Version:"));
 						qint64 ver = verStr.isEmpty() ? 0 : verStr.toLongLong();
 						if (!ver || (ver == AppVersion) || (ver < 0 && (-ver / 1000) == AppVersion)) {
-							h += _getApp.height() + padding;
-							_getApp.show();
+							if (HasDownloadLink()) {
+								h += _getApp.height() + padding;
+								_getApp.show();
+							} else {
+								_getApp.hide();
+							}
 							h -= _yourReportName.height() + padding; // hide report name
 							_yourReportName.hide();
 							if (!_reportUsername.isEmpty()) {
@@ -915,7 +928,11 @@ void LastCrashedWindow::updateControls() {
 			}
 		}
 
-		_getApp.show();
+		if (HasDownloadLink()) {
+			_getApp.show();
+		} else {
+			_getApp.hide();
+		}
 		h += _networkSettings.height() + padding;
 	}
 
@@ -1133,12 +1150,14 @@ void LastCrashedWindow::resizeEvent(QResizeEvent *e) {
 	} else {
 		_getApp.move((width() - _getApp.width()) / 2, _updating.y() + _updating.height() + padding);
 
-		_pleaseSendReport.move(padding, padding * 2 + _networkSettings.height() + _networkSettings.height() + padding + _getApp.height() + padding + (_showReport.height() - _pleaseSendReport.height()) / 2);
-		_showReport.move(padding * 2 + _pleaseSendReport.width(), padding * 2 + _networkSettings.height() + _networkSettings.height() + padding + _getApp.height() + padding);
+		const auto appHeight = HasDownloadLink() ? _getApp.height() : 0;
+
+		_pleaseSendReport.move(padding, padding * 2 + _networkSettings.height() + _networkSettings.height() + padding + appHeight + padding + (_showReport.height() - _pleaseSendReport.height()) / 2);
+		_showReport.move(padding * 2 + _pleaseSendReport.width(), padding * 2 + _networkSettings.height() + _networkSettings.height() + padding + appHeight + padding);
 		_yourReportName.move(padding, _showReport.y() + _showReport.height() + padding);
 		_includeUsername.move(padding, _yourReportName.y() + _yourReportName.height() + padding);
 
-		_networkSettings.move(padding * 2 + _pleaseSendReport.width(), padding * 2 + _networkSettings.height() + _networkSettings.height() + padding + _getApp.height() + padding);
+		_networkSettings.move(padding * 2 + _pleaseSendReport.width(), padding * 2 + _networkSettings.height() + _networkSettings.height() + padding + appHeight + padding);
 	}
 	if (_reportUsername.isEmpty()) {
 		_report.setGeometry(padding, _yourReportName.y() + _yourReportName.height() + padding, width() - 2 * padding, _pleaseSendReport.height() * 12.5);

@@ -7,7 +7,7 @@
 
 namespace Impulse::Links {
 
-// Host of an absolute prefix such as "https://o.impulsem.net/", lowercase,
+// Host of an absolute prefix such as "https://o.example.org/", lowercase,
 // without a port. Returns an empty string when the prefix has no host.
 [[nodiscard]] std::string PrefixHost(std::string_view prefix);
 

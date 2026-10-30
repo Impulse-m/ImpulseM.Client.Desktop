@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/peers/edit_peer_invite_links.h"
 
+#include "core/impulse_build_links.h"
 #include "data/data_peer.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
@@ -295,6 +296,11 @@ QString Row::generateName() {
 		return _data.label;
 	}
 	auto result = _data.link;
+	const auto linkHost = Impulse::BuildLinks::LinkHost();
+	if (!linkHost.isEmpty()) {
+		result.replace(linkHost + u"/+"_q, QString());
+		result.replace(linkHost + u"/joinchat/"_q, QString());
+	}
 	return result.replace(
 		u"https://"_q,
 		QString()
@@ -303,12 +309,6 @@ QString Row::generateName() {
 		QString()
 	).replace(
 		u"t.me/joinchat/"_q,
-		QString()
-	).replace(
-		u"o.impulsem.net/+"_q,
-		QString()
-	).replace(
-		u"o.impulsem.net/joinchat/"_q,
 		QString()
 	);
 }

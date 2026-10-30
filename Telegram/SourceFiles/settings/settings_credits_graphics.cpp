@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers_gift_box_pack.h"
 #include "chat_helpers/stickers_lottie.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "core/click_handler_types.h"
 #include "core/click_handler_types.h" // UrlClickHandler
 #include "core/ton_explorer_url.h"
@@ -820,8 +821,8 @@ void FillCreditOptions(
 				rpl::combine(
 					tr::lng_credits_summary_options_about_link(),
 					tr::lng_credits_summary_options_about_url()
-				) | rpl::map([](const QString &text, const QString &url) {
-					return tr::link(text, url);
+				) | rpl::map([](const QString &text, const QString &path) {
+					return Impulse::BuildLinks::SiteLinkText(text, path);
 				}),
 				tr::rich);
 			Ui::AddSkip(content);
@@ -872,8 +873,9 @@ void FillCreditOptions(
 		box,
 		tr::lng_credits_box_out_about(
 			lt_link,
-			tr::lng_payments_terms_link(
-				tr::url(tr::lng_credits_box_out_about_link(tr::now))),
+			rpl::single(Impulse::BuildLinks::SiteLinkText(
+				tr::lng_payments_terms_link(tr::now),
+				tr::lng_credits_box_out_about_link(tr::now))),
 			tr::marked),
 		st::creditsBoxAboutDivider);
 }
@@ -2051,6 +2053,7 @@ void GenericCreditsEntryBody(
 	const auto arrow = Ui::Text::IconEmoji(&st::textMoreIconEmoji);
 	if (!uniqueGift && (starGiftCanManage || e.converted)) {
 		Ui::AddSkip(content);
+		const auto hasAboutLink = !tr::lng_paid_about_link_url(tr::now).isEmpty();
 		const auto about = box->addRow(
 			object_ptr<Ui::FlatLabel>(
 				box,
@@ -2085,11 +2088,13 @@ void GenericCreditsEntryBody(
 									rpl::single(e.starsConverted * 1.),
 									tr::rich),
 							tr::lng_paid_about_link()
-						) | rpl::map([](
+						) | rpl::map([=](
 								TextWithEntities text,
 								QString link) {
 							return text.append(' ').append(
-								tr::link(link));
+								hasAboutLink
+									? tr::link(link)
+									: TextWithEntities{ link });
 						})
 						: (e.savedToProfile
 							? (giftToChannel
@@ -2102,9 +2107,10 @@ void GenericCreditsEntryBody(
 				st::creditsBoxAbout),
 			style::al_top);
 		about->setClickHandlerFilter([=](const auto &...) {
-			Core::App().iv().openWithIvPreferred(
-				session,
-				tr::lng_paid_about_link_url(tr::now));
+			const auto url = tr::lng_paid_about_link_url(tr::now);
+			if (!url.isEmpty()) {
+				Core::App().iv().openWithIvPreferred(session, url);
+			}
 			return false;
 		});
 		if (e.giftRefunded) {
@@ -3781,9 +3787,11 @@ void AddWithdrawalWidget(
 					rpl::single(Ui::Text::IconEmoji(&st::textMoreIconEmoji)),
 					tr::rich
 				) | rpl::map([](TextWithEntities text) {
-					return tr::link(
-						std::move(text),
+					const auto url = Impulse::BuildLinks::SitePage(
 						tr::lng_bot_earn_balance_about_url(tr::now));
+					return url.isEmpty()
+						? text
+						: tr::link(std::move(text), url);
 				}),
 			tr::rich),
 		st::boxDividerLabel);

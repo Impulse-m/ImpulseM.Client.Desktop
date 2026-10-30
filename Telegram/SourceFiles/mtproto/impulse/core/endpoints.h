@@ -1,4 +1,5 @@
-// Endpoint addresses of the ImpulseM backend.
+// Endpoint addresses of the ImpulseM transport. They are derived from the
+// base URL of the transport host, IMPULSEM_RPC_URL, see build_config.h.
 #pragma once
 
 #include <optional>
@@ -7,12 +8,11 @@
 
 namespace Impulse::Endpoints {
 
-inline constexpr std::string_view kRpcBase = "https://rpc.impulsem.io";
-inline constexpr std::string_view kUpdateUrl
-	= "wss://rpc.impulsem.io/connection/websocket?cf_ws_frame_ping_pong=true";
-inline constexpr std::string_view kPoolUrl
-	= "wss://rpc.impulsem.io/pool/connection/websocket"
-	  "?cf_protocol=protobuf&cf_ws_frame_ping_pong=true";
+// Websocket endpoints of the update and pool fleets. The base is an https or
+// http URL; it becomes wss or ws. An empty or unsupported base gives an empty
+// endpoint, which the transport does not dial.
+[[nodiscard]] std::string UpdateUrl(std::string_view rpcBase);
+[[nodiscard]] std::string PoolUrl(std::string_view rpcBase);
 
 // Builds the media fleet URL from a DC option address. An IPv6 literal is
 // wrapped in brackets; an address that is already bracketed is kept as is.

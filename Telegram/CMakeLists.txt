@@ -25,6 +25,7 @@ get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
 include(cmake/telegram_options.cmake)
+include(cmake/impulse/build_config.cmake)
 include(cmake/lib_ffmpeg.cmake)
 include(cmake/lib_stripe.cmake)
 include(cmake/lib_tgcalls.cmake)
@@ -2762,6 +2763,8 @@ PRIVATE
     G_LOG_DOMAIN="Telegram"
 )
 
+target_sources(Telegram PRIVATE ${impulse_build_config_src})
+
 get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if (APPLE
     OR is_multi_config
@@ -2866,6 +2869,9 @@ if (NOT DESKTOP_APP_DISABLE_AUTOUPDATE AND NOT build_macstore AND NOT build_wins
         _other/updater_osx.m
         _other/updater.h
     )
+
+    target_include_directories(Updater PRIVATE ${src_loc})
+    target_sources(Updater PRIVATE ${impulse_build_config_src})
 
     set_target_properties(Updater PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${output_folder}

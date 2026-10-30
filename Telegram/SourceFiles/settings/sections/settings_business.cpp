@@ -478,7 +478,7 @@ void BuildSponsoredSection(
 									tr::rich),
 								tr::lng_business_about_sponsored_url()
 							) | rpl::map([](TextWithEntities text, QString url) {
-								return tr::link(text, url);
+								return url.isEmpty() ? text : tr::link(text, url);
 							}),
 							tr::rich),
 						st::boxDividerLabel),

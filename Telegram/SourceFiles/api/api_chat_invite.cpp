@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_credits.h"
 #include "boxes/premium_limits_box.h"
 #include "core/application.h"
+#include "core/impulse_build_links.h"
 #include "data/components/credits.h"
 #include "data/data_channel.h"
 #include "data/data_file_origin.h"
@@ -318,8 +319,8 @@ void ConfirmSubscriptionBox(
 				rpl::combine(
 					tr::lng_paid_react_agree_link(),
 					tr::lng_group_invite_subscription_about_url()
-				) | rpl::map([](const QString &text, const QString &url) {
-					return tr::link(text, url);
+				) | rpl::map([](const QString &text, const QString &path) {
+					return Impulse::BuildLinks::SiteLinkText(text, path);
 				}),
 				tr::rich),
 			st::inviteLinkSubscribeBoxTerms),

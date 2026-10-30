@@ -152,6 +152,10 @@ jobs:
         env:
           IMPULSEM_API_ID: ${{ secrets.IMPULSEM_API_ID }}
           IMPULSEM_API_HASH: ${{ secrets.IMPULSEM_API_HASH }}
+          IMPULSEM_RPC_URL: ${{ vars.IMPULSEM_RPC_URL }}
+          IMPULSEM_SITE_URL: ${{ vars.IMPULSEM_SITE_URL }}
+          IMPULSEM_LINK_HOST: ${{ vars.IMPULSEM_LINK_HOST }}
+          IMPULSEM_WEB_URL: ${{ vars.IMPULSEM_WEB_URL }}
         run: |
           ARTIFACT_NAME="Telegram"
 
@@ -190,7 +194,13 @@ jobs:
             echo "The IMPULSEM_API_ID and IMPULSEM_API_HASH secrets are required."
             exit 1
           fi
+          if [ -z "$IMPULSEM_RPC_URL" ]; then
+            echo "The IMPULSEM_RPC_URL variable is required."
+            exit 1
+          fi
           API="-D TDESKTOP_API_ID=$IMPULSEM_API_ID -D TDESKTOP_API_HASH=$IMPULSEM_API_HASH"
+          API="$API -D IMPULSEM_RPC_URL=$IMPULSEM_RPC_URL -D IMPULSEM_SITE_URL=$IMPULSEM_SITE_URL"
+          API="$API -D IMPULSEM_LINK_HOST=$IMPULSEM_LINK_HOST -D IMPULSEM_WEB_URL=$IMPULSEM_WEB_URL"
           echo "TDESKTOP_BUILD_API=$API" >> $GITHUB_ENV
 
       - name: Free up some disk space.

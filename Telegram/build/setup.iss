@@ -1,7 +1,9 @@
 #define MyAppShortName "ImpulseM"
 #define MyAppName "ImpulseM Desktop"
 #define MyAppPublisher "ImpulseM"
-#define MyAppURL "https://desktop.impulsem.net"
+#ifndef MyAppURL
+#define MyAppURL ""
+#endif
 #define MyAppExeName "ImpulseM.exe"
 #define MyAppId "0C1DFEC9-F612-4B38-977D-95E32EBCB619"
 #define CurrentYear GetDateTimeString('yyyy','','')

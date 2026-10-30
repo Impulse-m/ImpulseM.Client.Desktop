@@ -2993,8 +2993,9 @@ object_ptr<Ui::BoxContent> PopularAppsAboutBox(
 				window->session().createInternalLinkFull(
 					u"botfather"_q))),
 			lt_link,
-			tr::lng_popular_apps_info_here(
-				tr::url(tr::lng_popular_apps_info_url(tr::now))),
+			rpl::single(TextWithEntities{
+				tr::lng_popular_apps_info_here(tr::now)
+			}),
 			tr::rich),
 		.confirmText = tr::lng_popular_apps_info_confirm(),
 		.title = tr::lng_popular_apps_info_title(),

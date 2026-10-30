@@ -569,8 +569,8 @@ void InnerWidget::fill() {
 									: u" diamonds!"_q)));
 					}));
 				}
-				Ui::AddSkip(content);
-				{
+				if (!tr::lng_channel_earn_learn_coin_link(tr::now).isEmpty()) {
+					Ui::AddSkip(content);
 					const auto label = box->addRow(
 						object_ptr<Ui::FlatLabel>(
 							content,

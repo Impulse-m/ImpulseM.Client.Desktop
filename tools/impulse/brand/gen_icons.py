@@ -34,6 +34,8 @@ TRAY_NAMES: Dict[str, str] = {
     BLUE_ON_WHITE: "tray_blue_on_white.svg",
 }
 TRAY_MASK_NAME: str = "tray_monochrome.svg"
+# The stroke of the Android monochrome notification icon (drawable/notification.xml).
+TRAY_MASK_WIDTH: float = 16.0
 
 ATTRIBUTE_RE: re.Pattern[str] = re.compile(r'([A-Za-z][\w:-]*)\s*=\s*"([^"]*)"')
 PATH_TOKEN_RE: re.Pattern[str] = re.compile(
@@ -291,7 +293,7 @@ def tray_mask_svg(logo: Logo) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{logo.view_size:g}" '
         f'height="{logo.view_size:g}" viewBox="0 0 {logo.view_size:g} {logo.view_size:g}">'
         f'<path d="{path_data}" fill="none" stroke="#000000" '
-        f'stroke-width="{logo.glyph_width:g}" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'stroke-width="{TRAY_MASK_WIDTH:g}" stroke-linecap="round" stroke-linejoin="round"/>'
         f"</svg>"
     )
 

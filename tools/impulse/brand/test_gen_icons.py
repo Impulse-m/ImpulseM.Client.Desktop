@@ -182,6 +182,7 @@ class GenIconsTest(unittest.TestCase):
         mask: str = self.icon_path("tray_monochrome.svg").read_text(encoding="utf-8")
         self.assertNotIn("<circle", mask)
         self.assertIn('stroke="#000000"', mask)
+        self.assertIn('stroke-width="16"', mask)
         self.assertIn('stroke-linecap="round"', mask)
 
 

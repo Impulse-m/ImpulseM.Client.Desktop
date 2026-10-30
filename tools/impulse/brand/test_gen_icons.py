@@ -181,7 +181,8 @@ class GenIconsTest(unittest.TestCase):
     def test_tray_mask_is_glyph_only(self) -> None:
         mask: str = self.icon_path("tray_monochrome.svg").read_text(encoding="utf-8")
         self.assertNotIn("<circle", mask)
-        self.assertIn('stroke="#000000"', mask)
+        # The tray colours the mask by its blue channel (style::colorizeImage), as upstream's white mask.
+        self.assertIn('stroke="#FFFFFF"', mask)
         self.assertIn('stroke-width="16"', mask)
         self.assertIn('stroke-linecap="round"', mask)
 

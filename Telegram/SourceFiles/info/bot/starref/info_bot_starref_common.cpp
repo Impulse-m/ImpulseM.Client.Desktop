@@ -700,9 +700,9 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 			button,
 			tr::lng_star_ref_one_join_text(
 				lt_terms,
-				Impulse::BuildLinks::SiteLinkText(
+				rpl::single(Impulse::BuildLinks::SiteLinkText(
 					tr::lng_star_ref_button_link(tr::now),
-					tr::lng_star_ref_tos_url(tr::now)),
+					tr::lng_star_ref_tos_url(tr::now))),
 				tr::marked));
 	});
 }

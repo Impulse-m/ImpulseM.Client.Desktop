@@ -23,9 +23,11 @@ namespace {
 
 // The shipped st::windowBg values the self-test expects: day from
 // Telegram/lib_ui/ui/colors.palette, night from the colors.tdesktop-theme
-// inside Telegram/Resources/night.tdesktop-theme (NightThemePath()).
+// inside Telegram/Resources/night-green.tdesktop-theme (NightThemePath(), the
+// default night theme). This is shipped data that follows the default night
+// theme's surface (#1d2128), not a value fitted to a run.
 constexpr auto kShippedDayWindowBg = qRgb(0xff, 0xff, 0xff);
-constexpr auto kShippedNightWindowBg = qRgb(0x17, 0x21, 0x2b);
+constexpr auto kShippedNightWindowBg = qRgb(0x1d, 0x21, 0x28);
 
 // The self-test's bare-toggle observation window, and the colour its
 // nondiscriminating probe always answers.
@@ -208,7 +210,7 @@ using DriverList = std::vector<std::weak_ptr<PaletteSwitchDriver>>;
 [[nodiscard]] QString ShippedText() {
 	return u"shipped windowBg: day %1 (Telegram/lib_ui/ui/colors.palette), "
 		u"night %2 (colors.tdesktop-theme inside "
-		u"Telegram/Resources/night.tdesktop-theme)"_q.arg(
+		u"Telegram/Resources/night-green.tdesktop-theme)"_q.arg(
 			ColorText(ShippedWindowBg(false)),
 			ColorText(ShippedWindowBg(true)));
 }

@@ -94,6 +94,7 @@ void KeepFromEditor(
 	const ParsedTheme &themeParsed,
 	const QImage &background);
 QString NightThemePath();
+[[nodiscard]] bool IsNightThemePath(const QString &path);
 [[nodiscard]] bool IsNightMode();
 void SetNightModeValue(bool nightMode);
 [[nodiscard]] rpl::producer<bool> IsNightModeValue();

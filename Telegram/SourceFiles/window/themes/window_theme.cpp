@@ -54,7 +54,8 @@ namespace {
 
 constexpr auto kThemeFileSizeLimit = 5 * 1024 * 1024;
 constexpr auto kBackgroundSizeLimit = 25 * 1024 * 1024;
-constexpr auto kNightThemeFile = ":/gui/night.tdesktop-theme"_cs;
+constexpr auto kNightThemeFile = ":/gui/night-green.tdesktop-theme"_cs;
+constexpr auto kTintedThemeFile = ":/gui/night.tdesktop-theme"_cs;
 constexpr auto kDarkValueThreshold = 0.5;
 
 struct Applying {
@@ -1476,6 +1477,11 @@ void Revert() {
 
 QString NightThemePath() {
 	return kNightThemeFile.utf16();
+}
+
+bool IsNightThemePath(const QString &path) {
+	return (path == NightThemePath())
+		|| (path == kTintedThemeFile.utf16());
 }
 
 bool IsNonDefaultBackground() {

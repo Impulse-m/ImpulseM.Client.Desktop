@@ -240,9 +240,9 @@ style::colorizer ColorizerFrom(
 	case EmbeddedType::Night:
 		result.keepContrast = base::flat_map<QLatin1String, Pair>{ {
 			//{ qstr("windowFgActive"), Pair{ cColor("5288c1"), cColor("17212b") } }, // windowBgActive
-			{ qstr("activeButtonFg"), Pair{ cColor("2f6ea5"), cColor("17212b") } }, // activeButtonBg
-			{ qstr("profileVerifiedCheckFg"), Pair{ cColor("5288c1"), cColor("17212b") } }, // profileVerifiedCheckBg
-			{ qstr("overviewCheckFgActive"), Pair{ cColor("5288c1"), cColor("17212b") } }, // overviewCheckBgActive
+			{ qstr("activeButtonFg"), Pair{ cColor("2f6ea5"), cColor("1d2733") } }, // activeButtonBg
+			{ qstr("profileVerifiedCheckFg"), Pair{ cColor("5288c1"), cColor("1d2733") } }, // profileVerifiedCheckBg
+			{ qstr("overviewCheckFgActive"), Pair{ cColor("5288c1"), cColor("1d2733") } }, // overviewCheckBgActive
 			{ qstr("historyFileInIconFg"), Pair{ cColor("3f96d0"), cColor("182533") } }, // msgFileInBg, msgInBg
 			{ qstr("historyFileInIconFgSelected"), Pair{ cColor("6ab4f4"), cColor("2e70a5") } }, // msgFileInBgSelected, msgInBgSelected
 			{ qstr("historyFileInRadialFg"), Pair{ cColor("3f96d0"), cColor("182533") } }, // msgFileInBg, msgInBg
@@ -256,10 +256,10 @@ style::colorizer ColorizerFrom(
 		break;
 	case EmbeddedType::NightGreen:
 		result.keepContrast = base::flat_map<QLatin1String, Pair>{ {
-			//{ qstr("windowFgActive"), Pair{ cColor("3fc1b0"), cColor("282e33") } }, // windowBgActive, windowBg
-			{ qstr("activeButtonFg"), Pair{ cColor("2da192"), cColor("282e33") } }, // activeButtonBg, windowBg
-			{ qstr("profileVerifiedCheckFg"), Pair{ cColor("3fc1b0"), cColor("282e33") } }, // profileVerifiedCheckBg, windowBg
-			{ qstr("overviewCheckFgActive"), Pair{ cColor("3fc1b0"), cColor("282e33") } }, // overviewCheckBgActive
+			//{ qstr("windowFgActive"), Pair{ cColor("58aeee"), cColor("1d2128") } }, // windowBgActive, windowBg
+			{ qstr("activeButtonFg"), Pair{ cColor("418dc7"), cColor("1d2128") } }, // activeButtonBg, windowBg
+			{ qstr("profileVerifiedCheckFg"), Pair{ cColor("58aeee"), cColor("1d2128") } }, // profileVerifiedCheckBg, windowBg
+			{ qstr("overviewCheckFgActive"), Pair{ cColor("58aeee"), cColor("1d2128") } }, // overviewCheckBgActive
 			// callIconFg is used not only over callAnswerBg,
 			// so this contrast-forcing breaks other buttons.
 			//{ qstr("callIconFg"), Pair{ cColor("5ad1c1"), cColor("1b1f23") } }, // callAnswerBg, callBgOpaque
@@ -374,25 +374,25 @@ std::vector<EmbeddedScheme> EmbeddedThemes() {
 		},
 		EmbeddedScheme{
 			EmbeddedType::Night,
-			qColor("485761"),
-			qColor("5ca7d4"),
-			qColor("6b808d"),
-			qColor("6b808d"),
-			qColor("5ca7d4"),
+			qColor("151e27"),
+			qColor("2c6a94"),
+			qColor("182533"),
+			qColor("708499"),
+			qColor("58aeee"),
 			name(tr::lng_settings_theme_tinted),
 			":/gui/night.tdesktop-theme",
 			qColor("58aeee")
 		},
 		EmbeddedScheme{
 			EmbeddedType::NightGreen,
-			qColor("485761"),
-			qColor("6b808d"),
-			qColor("6b808d"),
-			qColor("6b808d"),
-			qColor("75bfb5"),
+			qColor("14181f"),
+			qColor("2a2f33"),
+			qColor("33393f"),
+			qColor("82868a"),
+			qColor("58aeee"),
 			name(tr::lng_settings_theme_night),
 			":/gui/night-green.tdesktop-theme",
-			qColor("3fc1b0")
+			qColor("58aeee")
 		},
 	};
 }
@@ -437,7 +437,7 @@ std::vector<QColor> DefaultAccentColors(EmbeddedType type) {
 		};
 	case EmbeddedType::NightGreen:
 		return {
-			qColor("60a8e7"),
+			qColor("58aeee"),
 			qColor("4e9c57"),
 			qColor("ca7896"),
 			qColor("cc925c"),

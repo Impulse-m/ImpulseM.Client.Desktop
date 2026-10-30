@@ -1208,8 +1208,8 @@ void InitialLoadTheme() {
 	} else if (const auto path = InitialLoadThemeUsingKey(key)) {
 		DEBUG_LOG(("Theme: loaded with result: %1").arg(*path));
 		if (_themeKeyLegacy) {
-			Window::Theme::SetNightModeValue(*path
-				== Window::Theme::NightThemePath());
+			Window::Theme::SetNightModeValue(
+				Window::Theme::IsNightThemePath(*path));
 			(Window::Theme::IsNightMode()
 				? _themeKeyNight
 				: _themeKeyDay) = base::take(_themeKeyLegacy);

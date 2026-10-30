@@ -174,6 +174,42 @@ constexpr std::uint32_t kUpdateLoginTokenConstructor = 0x564fe691;
 	return QString::fromLatin1("unknown");
 }
 
+// The name of the socket or the fleet that carries a call of the kind.
+[[nodiscard]] QString SocketNameOf(CarrierKind carrier) {
+	switch (carrier) {
+	case CarrierKind::Update:
+		return QString::fromLatin1("update socket");
+	case CarrierKind::Pool:
+		return QString::fromLatin1("pool socket");
+	case CarrierKind::Media:
+		return QString::fromLatin1("media fleet");
+	}
+	return QString::fromLatin1("unknown");
+}
+
+// The carrier of a call of the method as its route has it now. The update
+// socket is the identity socket while signed out.
+[[nodiscard]] QString CarrierNameOf(const std::string &method, bool signedIn) {
+	RouteRequest route;
+	route.method = method;
+	route.signedIn = signedIn;
+	const RouteDecision decision = routeMethod(route);
+	if (decision.refused) {
+		return QString::fromLatin1("refused locally");
+	}
+	if (decision.carrier == CarrierKind::Update && !signedIn) {
+		return QString::fromLatin1("identity socket");
+	}
+	return SocketNameOf(decision.carrier);
+}
+
+// The text of an error, or none when the error has no text.
+[[nodiscard]] QString TextOrNone(const std::string &text) {
+	return text.empty()
+		? QString::fromLatin1("none")
+		: QString::fromStdString(text);
+}
+
 // A short tag of an identity token for the diagnostic lines: the first four
 // bytes of the SHA-256 of its subject, in hex, and its orig_iat. The token and
 // the subject itself are never written.
@@ -845,6 +881,17 @@ void ImpulseConnection::settle(
 			).arg(QString::fromStdString(pending->method)
 			).arg(OutcomeKindName(reply.outcome.kind)));
 	}
+	if (reply.outcome.kind != CarrierOutcomeKind::Reply) {
+		DEBUG_LOG(("Impulse Info: connection %1 request %2 %3 settled as %4, code %5, text %6, carrier %7, cancelled %8."
+			).arg(QString::number(serial)
+			).arg(QString::number(requestId)
+			).arg(QString::fromStdString(pending->method)
+			).arg(OutcomeKindName(reply.outcome.kind)
+			).arg(QString::number(reply.outcome.error.code)
+			).arg(TextOrNone(reply.outcome.error.text)
+			).arg(CarrierNameOf(pending->method, loginReady())
+			).arg(YesNo(pending->cancelled)));
+	}
 	const std::map<mtpRequestId, std::shared_ptr<PendingRequest>>::iterator found
 		= pendingRequests.find(requestId);
 	if (found != pendingRequests.end() && found->second == pending) {
@@ -882,12 +929,32 @@ void ImpulseConnection::callSocket(
 		std::vector<std::uint8_t> payload,
 		std::int64_t timeoutMs,
 		SocketCallDone done) {
+	// A failed socket call is logged here, since it never reaches the settle
+	// path. The serial is copied: a socket callback can run after this
+	// connection is gone.
+	const std::uint64_t connectionSerial = serial;
+	const QString socketName = SocketNameOf(carrier);
+	SocketCallDone settled = [connectionSerial, socketName, method, done = std::move(done)](
+			CarrierOutcome outcome,
+			std::vector<std::uint8_t> data) {
+		if (outcome.kind != CarrierOutcomeKind::Reply) {
+			DEBUG_LOG(("Impulse Info: connection %1 socket call %2 on %3 settled as %4, code %5, text %6."
+				).arg(QString::number(connectionSerial)
+				).arg(QString::fromStdString(method)
+				).arg(socketName
+				).arg(OutcomeKindName(outcome.kind)
+				).arg(QString::number(outcome.error.code)
+				).arg(TextOrNone(outcome.error.text)));
+		}
+		done(std::move(outcome), std::move(data));
+	};
+
 	if (!socket) {
 		// No socket is built for a blocked route: the call fails as a network
 		// failure, and nothing dials.
 		CarrierOutcome outcome;
 		outcome.kind = CarrierOutcomeKind::NetworkFailure;
-		done(std::move(outcome), {});
+		settled(std::move(outcome), {});
 		return;
 	}
 
@@ -898,19 +965,19 @@ void ImpulseConnection::callSocket(
 
 	const std::int32_t status = socket->rpc(
 		request,
-		[carrier, done](const CentrifugoResult &result) {
+		[carrier, settled](const CentrifugoResult &result) {
 			CarrierOutcome outcome = mapCarrierResult(result, carrier);
 			std::vector<std::uint8_t> data;
 			if (outcome.kind == CarrierOutcomeKind::Reply) {
 				data = result.data;
 			}
-			done(std::move(outcome), std::move(data));
+			settled(std::move(outcome), std::move(data));
 		});
 	if (status != kCentrifugoStatusOk) {
 		// The completion does not run for a call that could not start.
 		CentrifugoResult failed;
 		failed.status = status;
-		done(mapCarrierResult(failed, carrier), {});
+		settled(mapCarrierResult(failed, carrier), {});
 	}
 }
 

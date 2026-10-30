@@ -39,6 +39,24 @@ constexpr std::int32_t kRpcErrorConstructor = 0x2144ca19;
 constexpr std::string_view kLocalFailureType = "CLIENT_LOCAL_FAILURE";
 constexpr std::string_view kLocalFailureDescription = "The request failed locally.";
 
+// The constructors that the download lines read: upload.getFile and its
+// replies upload.file and upload.webFile, the input locations of a photo and a
+// document, and the wrappers that a request may carry in front of the call.
+constexpr std::uint32_t kUploadGetFileConstructor = 0xbe5335be;
+constexpr std::uint32_t kUploadFileConstructor = 0x096a18d5;
+constexpr std::uint32_t kUploadWebFileConstructor = 0x21e753bc;
+constexpr std::uint32_t kInputPhotoFileLocationConstructor = 0x40181ffe;
+constexpr std::uint32_t kInputDocumentFileLocationConstructor = 0xbad07584;
+constexpr std::uint32_t kInvokeWithoutUpdatesConstructor = 0xbf9459b7;
+constexpr std::uint32_t kInvokeWithLayerConstructor = 0xda9b0d0d;
+constexpr std::uint32_t kInvokeWithTakeoutConstructor = 0xaca9fd2e;
+constexpr std::uint32_t kInvokeAfterMsgConstructor = 0xcb9f372d;
+
+// The bytes of a value that a diagnostic line shows, and the characters of a
+// string that it shows.
+constexpr std::size_t kDiagnosticBytes = 8;
+constexpr std::size_t kDiagnosticStringBytes = 16;
+
 // The mapping of the layer 232 schema, next to the executable.
 [[nodiscard]] std::string MappingFilePath() {
 	return (cExeDir() + "impulse/tl-proto-232.json.gz").toStdString();
@@ -119,11 +137,258 @@ struct RequestCodec final {
 	return TlBytesToBuffer<mtpBuffer>(writer.bytes());
 }
 
+// The byte string of a value in hex digit pairs, at most limit bytes. None
+// when the value has no bytes.
+[[nodiscard]] QString HexOf(
+		std::span<const std::uint8_t> bytes,
+		std::size_t limit) {
+	const std::size_t shown = (bytes.size() < limit) ? bytes.size() : limit;
+	QString hex;
+	for (std::size_t index = 0; index < shown; ++index) {
+		hex += QString::number(bytes[index] >> 4, 16);
+		hex += QString::number(bytes[index] & 0x0F, 16);
+	}
+	return hex.isEmpty() ? QString::fromLatin1("none") : hex;
+}
+
+// A constructor or type id in hex: the 0x prefix and eight digits.
+[[nodiscard]] QString HexWord(std::uint32_t value) {
+	return QString::fromLatin1("0x")
+		+ QString::number(value, 16).rightJustified(8, QChar('0'));
+}
+
+// A thumb_size string for a diagnostic line: its text when every shown byte is
+// printable, else its hex. Only the first bytes are shown.
+[[nodiscard]] QString ThumbSizeText(std::span<const std::uint8_t> value) {
+	if (value.empty()) {
+		return QString::fromLatin1("empty");
+	}
+	const std::size_t shown = (value.size() < kDiagnosticStringBytes)
+		? value.size()
+		: kDiagnosticStringBytes;
+	bool printable = true;
+	for (std::size_t index = 0; index < shown; ++index) {
+		if (value[index] < 0x20 || value[index] > 0x7E) {
+			printable = false;
+		}
+	}
+	if (!printable) {
+		return QString::fromLatin1("hex ") + HexOf(value, kDiagnosticStringBytes);
+	}
+	return QString::fromLatin1("\"%1\"").arg(QString::fromLatin1(
+		reinterpret_cast<const char *>(value.data()),
+		static_cast<int>(shown)));
+}
+
+// The facts of an upload.getFile request that the download lines show: the
+// constructor of its InputFileLocation, and the thumb_size of a photo or a
+// document location. Every read is bounded by the request.
+struct DownloadRequestFacts {
+	bool located = false;
+	std::uint32_t locationConstructor = 0;
+	QString thumbSize = QString::fromLatin1("none");
+};
+
+[[nodiscard]] DownloadRequestFacts ReadGetFileRequest(
+		std::span<const std::uint8_t> body) {
+	DownloadRequestFacts facts;
+	try {
+		TlReader reader(body);
+		std::uint32_t constructor = static_cast<std::uint32_t>(reader.readInt32());
+
+		// The wrappers in front of the call each carry a fixed prefix: the layer
+		// or the takeout id, or a message id. The prefix is read past.
+		while (constructor == kInvokeWithoutUpdatesConstructor
+			|| constructor == kInvokeWithLayerConstructor
+			|| constructor == kInvokeWithTakeoutConstructor
+			|| constructor == kInvokeAfterMsgConstructor) {
+			if (constructor == kInvokeWithLayerConstructor) {
+				static_cast<void>(reader.readInt32());
+			} else if (constructor == kInvokeWithTakeoutConstructor
+				|| constructor == kInvokeAfterMsgConstructor) {
+				static_cast<void>(reader.readInt64());
+			}
+			constructor = static_cast<std::uint32_t>(reader.readInt32());
+		}
+		if (constructor != kUploadGetFileConstructor) {
+			return facts;
+		}
+
+		// The flags word: the precise and cdn_supported flags carry no value.
+		static_cast<void>(reader.readInt32());
+		facts.locationConstructor = static_cast<std::uint32_t>(reader.readInt32());
+		facts.located = true;
+		if (facts.locationConstructor == kInputPhotoFileLocationConstructor
+			|| facts.locationConstructor == kInputDocumentFileLocationConstructor) {
+			static_cast<void>(reader.readInt64());
+			static_cast<void>(reader.readInt64());
+			static_cast<void>(reader.readBytes());
+			facts.thumbSize = ThumbSizeText(reader.readBytes());
+		}
+	} catch (const TranscodeError &) {
+		// The facts read before the short end are kept.
+	}
+	return facts;
+}
+
+// The request of a download, for the download lines.
+[[nodiscard]] QString DownloadRequestText(const SerializedRequest &request) {
+	const DownloadRequestFacts facts = ReadGetFileRequest(BodyBytes(request));
+	if (!facts.located) {
+		return QString::fromLatin1("request not read");
+	}
+	return QString::fromLatin1("location %1, thumb_size %2")
+		.arg(HexWord(facts.locationConstructor))
+		.arg(facts.thumbSize);
+}
+
+// The name of a download call, upload.getFile or upload.getWebFile, or an
+// empty string for every other method.
+[[nodiscard]] QString DownloadNameOf(
+		const RequestCodec &codec,
+		std::uint32_t methodId) {
+	const std::optional<std::uint32_t> getFile
+		= codec.table.methodId("upload.getFile");
+	if (getFile && *getFile == methodId) {
+		return QString::fromLatin1("upload.getFile");
+	}
+	const std::optional<std::uint32_t> getWebFile
+		= codec.table.methodId("upload.getWebFile");
+	if (getWebFile && *getWebFile == methodId) {
+		return QString::fromLatin1("upload.getWebFile");
+	}
+	return QString();
+}
+
+// The TL name of a method, for the lines that name it.
+[[nodiscard]] QString MethodNameOf(
+		const RequestCodec &codec,
+		std::uint32_t methodId) {
+	for (const MappingMethod &method : codec.table.mapping().methods) {
+		if (method.id == methodId) {
+			return QString::fromStdString(method.name);
+		}
+	}
+	return QString::fromLatin1("unknown method");
+}
+
+// The facts of a successful download reply, read from its TL object: the
+// constructor, the storage.FileType of upload.file, and the length and the
+// first bytes of the bytes field. Every read is bounded; a reply that is short
+// keeps the facts read before its end.
+[[nodiscard]] QString TlFileReplyText(std::span<const std::uint8_t> tl) {
+	std::uint32_t constructor = 0;
+	QString storage = QString::fromLatin1("none");
+	std::span<const std::uint8_t> bytes;
+	try {
+		TlReader reader(tl);
+		constructor = static_cast<std::uint32_t>(reader.readInt32());
+		if (constructor == kUploadFileConstructor) {
+			storage = HexWord(static_cast<std::uint32_t>(reader.readInt32()));
+			static_cast<void>(reader.readInt32());
+			bytes = reader.readBytes();
+		} else if (constructor == kUploadWebFileConstructor) {
+			static_cast<void>(reader.readInt32());
+			static_cast<void>(reader.readBytes());
+			storage = HexWord(static_cast<std::uint32_t>(reader.readInt32()));
+			static_cast<void>(reader.readInt32());
+			bytes = reader.readBytes();
+		}
+	} catch (const TranscodeError &) {
+		// The facts read before the short end are kept.
+	}
+	return QString::fromLatin1("reply %1, storage %2, bytes %3, first %4")
+		.arg(HexWord(constructor))
+		.arg(storage)
+		.arg(QString::number(static_cast<qulonglong>(bytes.size())))
+		.arg(HexOf(bytes, kDiagnosticBytes));
+}
+
+// The facts of a download reply that is still proto: the top-level field with
+// the longest length-delimited value is taken as the bytes field, and its
+// number, length and first bytes are shown. The mapping is not consulted.
+[[nodiscard]] QString ProtoFileReplyText(const std::vector<std::uint8_t> &proto) {
+	std::uint32_t bestField = 0;
+	std::span<const std::uint8_t> best;
+	bool found = false;
+	try {
+		ProtoReader reader(proto);
+		while (reader.next()) {
+			if (reader.wireType() == ProtoWireType::LengthDelimited) {
+				const std::span<const std::uint8_t> value = reader.readBytes();
+				if (!found || value.size() > best.size()) {
+					bestField = reader.field();
+					best = value;
+					found = true;
+				}
+			} else {
+				reader.skip();
+			}
+		}
+	} catch (const ProtoWireError &) {
+		// The fields read before the bad one are kept.
+	}
+	if (!found) {
+		return QString::fromLatin1("proto no bytes field");
+	}
+	return QString::fromLatin1("proto field %1, bytes %2, first %3")
+		.arg(QString::number(bestField))
+		.arg(QString::number(static_cast<qulonglong>(best.size())))
+		.arg(HexOf(best, kDiagnosticBytes));
+}
+
+// The line of a server reply that does not convert to TL. A download adds the
+// facts of its request and of its proto reply, which is still proto here.
+void LogNotConverted(
+		mtpRequestId requestId,
+		const RequestCodec &codec,
+		std::uint32_t methodId,
+		const std::vector<std::uint8_t> &proto,
+		const SerializedRequest &request,
+		const QString &reason) {
+	const QString download = DownloadNameOf(codec, methodId);
+	if (download.isEmpty()) {
+		DEBUG_LOG(("Impulse Info: request %1 %2 was not converted, %3."
+			).arg(QString::number(requestId)
+			).arg(MethodNameOf(codec, methodId)
+			).arg(reason));
+		return;
+	}
+	DEBUG_LOG(("Impulse Info: request %1 %2 was not converted, %3, %4, %5."
+		).arg(QString::number(requestId)
+		).arg(download
+		).arg(reason
+		).arg(DownloadRequestText(request)
+		).arg(ProtoFileReplyText(proto)));
+}
+
+// The line of a download that the carrier failed. The connection line before
+// it gives the code and the text of the failure.
+void LogDownloadFailure(
+		mtpRequestId requestId,
+		std::uint32_t methodId,
+		const SerializedRequest &request) {
+	const RequestCodec *const codec = SharedRequestCodec();
+	if (!codec) {
+		return;
+	}
+	const QString download = DownloadNameOf(*codec, methodId);
+	if (download.isEmpty()) {
+		return;
+	}
+	DEBUG_LOG(("Impulse Info: request %1 %2 failed, %3."
+		).arg(QString::number(requestId)
+		).arg(download
+		).arg(DownloadRequestText(request)));
+}
+
 // The TL result of a server reply. A reply that does not decode is a local
 // permanent failure, so it becomes an rpc_error of the CLIENT_* class.
 [[nodiscard]] mtpBuffer ResultBuffer(
+		mtpRequestId requestId,
 		std::uint32_t methodId,
-		const std::vector<std::uint8_t> &proto) {
+		const std::vector<std::uint8_t> &proto,
+		const SerializedRequest &request) {
 	const RequestCodec *const codec = SharedRequestCodec();
 	if (!codec) {
 		const RpcErrorPayload payload = MakeClientError(
@@ -138,8 +403,23 @@ struct RequestCodec final {
 			methodId,
 			proto,
 			TranscodeCaptureSink());
+		const QString download = DownloadNameOf(*codec, methodId);
+		if (!download.isEmpty()) {
+			DEBUG_LOG(("Impulse Info: request %1 %2 replied, %3, %4."
+				).arg(QString::number(requestId)
+				).arg(download
+				).arg(TlFileReplyText(tl)
+				).arg(ProtoFileReplyText(proto)));
+		}
 		return TlBytesToBuffer<mtpBuffer>(tl);
 	} catch (const TranscodeError &error) {
+		LogNotConverted(
+			requestId,
+			*codec,
+			methodId,
+			proto,
+			request,
+			QString::fromUtf8(error.what()));
 		const RpcErrorPayload payload = MakeClientError(
 			error.type(),
 			error.what());
@@ -147,6 +427,13 @@ struct RequestCodec final {
 			payload.type,
 			payload.description));
 	} catch (const MtpBufferBridgeError &error) {
+		LogNotConverted(
+			requestId,
+			*codec,
+			methodId,
+			proto,
+			request,
+			QString::fromUtf8(error.what()));
 		const RpcErrorPayload payload = MakeClientError(
 			kResponseParseFailedType,
 			error.what());
@@ -487,11 +774,14 @@ void ImpulseSessionPrivate::settleRequest(
 		shared->retryTimeout = 1;
 		++shared->retryGeneration;
 	}
+	if (reply.outcome.kind != CarrierOutcomeKind::Reply) {
+		LogDownloadFailure(requestId, methodId, request);
+	}
 	publishState(shared, data, MTP::ConnectedState);
 
 	MTP::Response response;
 	if (reply.outcome.kind == CarrierOutcomeKind::Reply) {
-		response.reply = ResultBuffer(methodId, reply.data);
+		response.reply = ResultBuffer(requestId, methodId, reply.data, request);
 	} else {
 		response.reply = OutcomeErrorBuffer(reply.outcome.error);
 	}

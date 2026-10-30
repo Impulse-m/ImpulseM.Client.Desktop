@@ -9354,7 +9354,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_impulse_proxy_error_invalid_subscription" = "Invalid subscription";
 "lng_impulse_proxy_error_subscription_not_found" = "Subscription not found";
 "lng_impulse_proxy_error_no_links" = "No VLESS links";
-"lng_impulse_proxy_error_no_links_skipped" = "No VLESS links ({count} skipped)";
+"lng_impulse_proxy_error_no_links_skipped" = "No VLESS links ({skipped} skipped)";
 "lng_impulse_proxy_error_http" = "HTTP {code}";
 "lng_impulse_proxy_error_network" = "Network error";
 "lng_impulse_proxy_error_invalid_config" = "Invalid server configuration";

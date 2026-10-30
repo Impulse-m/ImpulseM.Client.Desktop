@@ -326,7 +326,7 @@ struct PaletteRestore {
 // The helper measuring itself. It needs no session, network or chat; it
 // reads st::windowBg->c, whose shipped values are day #ffffff
 // (Telegram/lib_ui/ui/colors.palette) and night #1d2128 (the
-// colors.tdesktop-theme inside Telegram/Resources/night-green.tdesktop-theme).
+// colors.tdesktop-theme inside Telegram/Resources/night.tdesktop-theme).
 // The stages, in order, never interleaved with other stages:
 // - entry and premise: the fixture gate (theme started, no theme editing,
 //   no outstanding switch); the entry modes and sample are captured as a

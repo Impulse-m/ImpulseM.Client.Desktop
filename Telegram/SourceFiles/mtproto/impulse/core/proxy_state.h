@@ -108,4 +108,12 @@ struct State {
 // off is repaired to useForTransport on.
 [[nodiscard]] State Decode(std::string_view text);
 
+// Every server of the state: the manual ones, then the ones of each
+// subscription, in the order of the list.
+[[nodiscard]] std::vector<Server> AllServers(const State &state);
+
+// Whether the manual list or one of the subscriptions has the server with the
+// id.
+[[nodiscard]] bool HasServer(const State &state, const std::string &id);
+
 } // namespace Impulse::ProxyState

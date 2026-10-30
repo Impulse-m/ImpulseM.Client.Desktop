@@ -60,6 +60,35 @@ namespace {
 	return key;
 }
 
+// The servers in the order that a check measures them: the selected one first.
+[[nodiscard]] std::vector<ProxyState::Server> ImpulseCheckOrder(
+		const ProxyState::State &state) {
+	auto result = ProxyState::AllServers(state);
+	if (state.selectedId) {
+		const std::string selected = *state.selectedId;
+		std::stable_partition(
+			result.begin(),
+			result.end(),
+			[&](const ProxyState::Server &server) {
+				return server.id == selected;
+			});
+	}
+	return result;
+}
+
+// The sort group of a ping, as Android sorted() ranks the rows: the available
+// servers by ping, the never checked ones in the stored order, then the
+// unavailable ones.
+[[nodiscard]] std::pair<int, std::int64_t> ImpulseSortKey(
+		std::optional<std::int64_t> ping) {
+	if (!ping) {
+		return { 1, 0 };
+	} else if (*ping < 0) {
+		return { 2, 0 };
+	}
+	return { 0, *ping };
+}
+
 // The invoker before the core exists. Every call gives an empty response.
 [[nodiscard]] Xray::Invoker EmptyInvoker() {
 	return [](const std::string &, const std::string &) {
@@ -250,6 +279,7 @@ ImpulseProxyService::~ImpulseProxyService() {
 
 void ImpulseProxyService::apply(const ProxyState::State &state) {
 	currentState = state;
+	prunePingResults(state);
 	armSubscriptionTimers(state);
 	const std::string key = ImpulseCoreKey(state);
 	const std::shared_ptr<ProxyServiceHost> shared = host;
@@ -335,13 +365,44 @@ void ImpulseProxyService::refreshSubscription(
 		});
 }
 
-void ImpulseProxyService::checkServers(
+bool ImpulseProxyService::requestCheck(bool manual) {
+	// A running core carries the calls too, and a check restarts it, so the
+	// automatic rounds wait for it to stop.
+	if (!manual
+			&& currentState.advanced.pingSkipWhileConnected
+			&& running()) {
+		return false;
+	}
+	std::vector<ProxyState::Server> servers = ImpulseCheckOrder(currentState);
+	if (servers.empty()) {
+		return false;
+	}
+	if (roundRunning) {
+		// Rounds never queue: one more round runs when this one finishes.
+		checkAgain = true;
+		checkAgainManual = checkAgainManual || manual;
+		return false;
+	}
+	startCheck(currentState, std::move(servers), manual);
+	return true;
+}
+
+rpl::producer<> ImpulseProxyService::checkFinishedValue() const {
+	return checkFinishedStream.events();
+}
+
+void ImpulseProxyService::startCheck(
 		const ProxyState::State &state,
 		std::vector<ProxyState::Server> servers,
-		CheckCallback callback) {
+		bool manual) {
+	roundRunning = true;
+	roundIds.clear();
+	for (const ProxyState::Server &server : servers) {
+		roundIds.push_back(server.id);
+	}
 	const std::shared_ptr<ProxyServiceHost> shared = host;
 	const base::weak_ptr<ImpulseProxyService> weak = base::make_weak(this);
-	Post(shared, [shared, weak, state, servers, callback] {
+	Post(shared, [shared, weak, state, servers, manual] {
 		std::shared_ptr<Xray::PingHelper> ping;
 		{
 			std::lock_guard<std::mutex> lock(shared->mutex);
@@ -370,15 +431,94 @@ void ImpulseProxyService::checkServers(
 			std::lock_guard<std::mutex> lock(shared->mutex);
 			shared->checking = false;
 		}
-		crl::on_main(weak, [weak, results, callback] {
+		crl::on_main(weak, [weak, servers, results, manual] {
 			if (ImpulseProxyService *const service = weak.get()) {
+				service->finishCheck(servers, results, manual);
 				service->refreshRoute();
-			}
-			if (callback) {
-				callback(results);
 			}
 		});
 	});
+}
+
+void ImpulseProxyService::finishCheck(
+		const std::vector<ProxyState::Server> &servers,
+		const std::vector<Xray::PingResult> &results,
+		bool manual) {
+	for (std::size_t i = 0; i < servers.size() && i < results.size(); ++i) {
+		if (ProxyState::HasServer(currentState, servers[i].id)) {
+			pingResults[servers[i].id] = results[i].delay;
+		}
+	}
+	roundRunning = false;
+	roundIds.clear();
+	lastCheckAt = QDateTime::currentMSecsSinceEpoch();
+	if (manual) {
+		rememberSortKeys();
+	}
+	if (checkAgain) {
+		const bool again = checkAgainManual;
+		checkAgain = false;
+		checkAgainManual = false;
+		requestCheck(again);
+	}
+	checkFinishedStream.fire({});
+}
+
+void ImpulseProxyService::rememberSortKeys() {
+	sortKeys.clear();
+	for (const ProxyState::Server &server
+			: ProxyState::AllServers(currentState)) {
+		sortKeys[server.id] = ImpulseSortKey(pingResult(server.id));
+	}
+}
+
+std::pair<int, std::int64_t> ImpulseProxyService::sortKey(
+		const std::string &id) const {
+	const std::map<std::string, std::pair<int, std::int64_t>>::const_iterator
+		found = sortKeys.find(id);
+	if (found == sortKeys.end()) {
+		return ImpulseSortKey(std::nullopt);
+	}
+	return found->second;
+}
+
+void ImpulseProxyService::prunePingResults(const ProxyState::State &state) {
+	std::erase_if(
+		pingResults,
+		[&](const std::pair<const std::string, std::int64_t> &entry) {
+			return !ProxyState::HasServer(state, entry.first);
+		});
+	std::erase_if(
+		sortKeys,
+		[&](const std::pair<const std::string, std::pair<int, std::int64_t>> &entry) {
+			return !ProxyState::HasServer(state, entry.first);
+		});
+}
+
+bool ImpulseProxyService::checkingServer(const std::string &id) const {
+	if (!roundRunning) {
+		return false;
+	}
+	for (const std::string &roundId : roundIds) {
+		if (roundId == id) {
+			return true;
+		}
+	}
+	return false;
+}
+
+std::int64_t ImpulseProxyService::lastCheckTime() const {
+	return lastCheckAt;
+}
+
+std::optional<std::int64_t> ImpulseProxyService::pingResult(
+		const std::string &id) const {
+	const std::map<std::string, std::int64_t>::const_iterator found
+		= pingResults.find(id);
+	if (found == pingResults.end()) {
+		return std::nullopt;
+	}
+	return found->second;
 }
 
 bool ImpulseProxyService::running() const {
@@ -415,13 +555,24 @@ rpl::producer<ProxyRouting::Route> ImpulseProxyService::routeValue() const {
 	return routeVariable.value();
 }
 
+Xray::Error ImpulseProxyService::error() const {
+	std::lock_guard<std::mutex> lock(host->mutex);
+	return host->runtime ? host->runtime->error() : Xray::Error::None;
+}
+
+rpl::producer<Xray::Error> ImpulseProxyService::errorValue() const {
+	return errorVariable.value();
+}
+
 void ImpulseProxyService::refreshRoute() {
 	Xray::Status status = Xray::Status::Off;
+	Xray::Error coreError = Xray::Error::None;
 	bool isRunning = false;
 	{
 		std::lock_guard<std::mutex> lock(host->mutex);
 		if (host->runtime) {
 			status = host->runtime->status();
+			coreError = host->runtime->error();
 		}
 		isRunning = !host->stale
 			&& !host->checking
@@ -433,6 +584,9 @@ void ImpulseProxyService::refreshRoute() {
 		isRunning);
 	if (stateVariable.current() != status) {
 		stateVariable = status;
+	}
+	if (errorVariable.current() != coreError) {
+		errorVariable = coreError;
 	}
 	if (routeVariable.current() != route) {
 		routeVariable = route;

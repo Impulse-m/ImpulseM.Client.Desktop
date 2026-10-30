@@ -13,11 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings_proxy.h"
 #include "core/impulse_proxy/proxy_ping.h"
 #include "core/impulse_proxy/proxy_service.h"
-#include "mtproto/connection_abstract.h"
 #include "mtproto/mtproto_proxy_data.h"
 
 #include <cstdint>
-#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -72,130 +70,74 @@ public:
 		NotTested,
 		Available,
 		Unavailable,
-		WaitingForBrowser,
 	};
 	struct ItemView {
-		int id = 0;
-		QString type;
-		QString host;
-		uint32 port = 0;
+		QString name;
 		int ping = 0;
 		bool selected = false;
-		bool deleted = false;
-		bool supportsShare = false;
-		bool supportsCalls = false;
-		bool web = false;
-		bool canOpenBrowser = false;
-		bool refreshable = false;
-		bool deletable = false;
-		bool editable = false;
 		ItemState state = ItemState::Checking;
-
 	};
+
+	// Called with the message to show, or an empty string when the text was
+	// taken. A call with alive() false is dropped, so a closed or cancelled
+	// Add box never receives a late result.
+	using ImpulseImportDone = Fn<void(QString message)>;
+	using ImpulseImportAlive = Fn<bool()>;
 
 	// ImpulseM VLESS list. Every change is stored in the proxy state and
 	// applied through the proxy service; impulseChanges() fires after each one.
 	void setImpulseEnabled(bool enabled);
-	[[nodiscard]] bool setImpulseUseForTransport(bool enabled);
-	[[nodiscard]] bool setImpulseUseForCalls(bool enabled);
-	void importText(const QString &text);
+	void importImpulseText(
+		const QString &text,
+		ImpulseImportAlive alive,
+		ImpulseImportDone done);
 	void refreshImpulseSubscription(const std::string &id);
 	void deleteImpulseServer(const std::string &id);
 	void deleteImpulseSubscription(const std::string &id);
 	void selectImpulseServer(const std::string &id);
-	void shareImpulseServer(const std::string &id, bool qr);
 	void shareImpulseList();
 	void checkImpulseServers();
-	void checkImpulseServer(const std::string &id);
-	void editImpulseServer(
-		const std::string &id,
-		const std::string &name,
-		const std::string &shareLink);
-	void applyImpulseServer(const std::string &id);
-	[[nodiscard]] std::optional<Impulse::ProxyState::Server> impulseManualServer(
+	void startImpulseAutoChecks();
+	[[nodiscard]] const Impulse::ProxyState::State &impulseState() const;
+	[[nodiscard]] std::optional<Impulse::ProxyState::Server> impulseServer(
 		const std::string &id) const;
-	[[nodiscard]] bool impulseChecking() const;
+	[[nodiscard]] bool impulseServerChecking(const std::string &id) const;
+	[[nodiscard]] bool impulseRefreshing(const std::string &id) const;
 	[[nodiscard]] std::optional<std::int64_t> impulsePing(
 		const std::string &id) const;
+	// The servers of one block in the order of the last manual check. The
+	// order is fixed when that check finishes, so automatic rounds never move
+	// the rows.
+	[[nodiscard]] std::vector<Impulse::ProxyState::Server> impulseSortedBlock(
+		std::vector<Impulse::ProxyState::Server> block) const;
 	[[nodiscard]] rpl::producer<> impulseChanges() const;
 
-	void deleteItem(int id);
-	void deleteItems();
-	void restoreItem(int id);
-	void shareItem(int id, bool qr);
-	void shareItems();
-	void openBrowser(int id);
-	bool setProxySettings(ProxyData::Settings value);
-	bool setProxyForCalls(bool enabled);
-	void setProxyRotationEnabled(bool enabled);
-	void setProxyRotationTimeout(int value);
-	void setTryIPv6(bool enabled);
-	rpl::producer<ProxyData::Settings> proxySettingsValue() const;
-
-	[[nodiscard]] bool contains(const ProxyData &proxy) const;
-
-	rpl::producer<ItemView> views() const;
-
-	rpl::producer<bool> listShareableChanges() const;
-
-	~ProxiesBoxController();
-
 private:
-	using Checker = MTP::details::ConnectionPointer;
-	struct Item {
-		int id = 0;
-		ProxyData data;
-		bool deleted = false;
-		Checker checker;
-		Checker checkerv6;
-		ItemState state = ItemState::Checking;
-		int ping = 0;
-
-	};
-
-	std::vector<Item>::iterator findById(int id);
-	std::vector<Item>::iterator findByProxy(const ProxyData &proxy);
-	void setDeleted(int id, bool deleted);
-	void updateView(const Item &item);
-	void share(const ProxyData &proxy, bool qr = false);
-	void saveDelayed();
-	void refreshChecker(Item &item);
 	void saveImpulse(Impulse::ProxyState::State state);
-	void addImpulseServers(std::vector<Impulse::ProxyState::Server> servers);
+	// Returns the message for the Add box, or an empty string when the links
+	// were added or were all in the list already.
+	[[nodiscard]] QString addImpulseServers(
+		std::vector<Impulse::ProxyState::Server> servers);
 	void fetchImpulseSubscription(
 		const std::string &url,
-		const std::string &id);
+		const std::string &id,
+		ImpulseImportAlive alive,
+		ImpulseImportDone done);
 	void applyImpulseSubscription(
 		const std::string &url,
 		const std::string &id,
+		ImpulseImportAlive alive,
+		ImpulseImportDone done,
 		Impulse::SubscriptionRefresh result);
-	void finishImpulseCheck(
-		const std::vector<Impulse::ProxyState::Server> &servers,
-		const std::vector<Impulse::Xray::PingResult> &results);
+	// Asks the service for a check round, and notifies the rows when one starts.
+	void requestImpulseCheck(bool manual);
 	void showImpulseToast(const QString &text);
-	void replaceImpulseServer(
-		const std::string &id,
-		const std::string &name,
-		std::vector<Impulse::ProxyState::Server> servers);
-	void runImpulseCheck(
-		const Impulse::ProxyState::State &state,
-		std::vector<Impulse::ProxyState::Server> servers);
 
 	const not_null<Main::Account*> _account;
 	Core::SettingsProxy &_settings;
-	int _idCounter = 0;
-	std::vector<Item> _list;
-	rpl::event_stream<ItemView> _views;
-	base::Timer _saveTimer;
-	rpl::event_stream<ProxyData::Settings> _proxySettingsChanges;
+	base::Timer _autoCheckTimer;
 	rpl::event_stream<> impulseChangeStream;
-	std::map<std::string, std::int64_t> impulsePingResults;
-	bool impulseCheckRunning = false;
 	std::shared_ptr<Ui::Show> _show;
-
-	ProxyData _lastSelectedProxy;
-	bool _lastSelectedProxyUsed = false;
-
-	rpl::lifetime _lifetime;
+	std::vector<std::string> _refreshing;
 
 };

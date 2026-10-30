@@ -96,6 +96,21 @@ using namespace Builder;
 }
 #endif // Q_OS_MAC && !OS_MAC_STORE
 
+// The Connection type label follows the ImpulseM VLESS proxy and whether the
+// account is connected, not the legacy proxy flag.
+[[nodiscard]] QString ConnectionTypeLabel(not_null<::Main::Account*> account) {
+	const auto connected = !account->mtp().dctransport().isEmpty();
+	const auto proxied = Core::App().settings().proxy().impulseProxyState().enabled;
+	if (proxied) {
+		return connected
+			? tr::lng_impulse_proxy_connection_proxy(tr::now)
+			: tr::lng_connection_proxy_connecting(tr::now);
+	}
+	return connected
+		? tr::lng_impulse_proxy_connection_default(tr::now)
+		: tr::lng_connection_auto_connecting(tr::now);
+}
+
 void BuildDataStorageSection(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 	const auto container = builder.container();
@@ -109,19 +124,6 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 		.keywords = { u"storage"_q, u"data"_q, u"download"_q, u"connection"_q },
 	});
 
-	const auto connectionType = [=] {
-		const auto transport = account->mtp().dctransport();
-		if (!Core::App().settings().proxy().isEnabled()) {
-			return transport.isEmpty()
-				? tr::lng_connection_auto_connecting(tr::now)
-				: tr::lng_connection_auto(tr::now, lt_transport, transport);
-		} else {
-			return transport.isEmpty()
-				? tr::lng_connection_proxy_connecting(tr::now)
-				: tr::lng_connection_proxy(tr::now, lt_transport, transport);
-		}
-	};
-
 	builder.addButton({
 		.id = u"advanced/connection_type"_q,
 		.title = tr::lng_settings_connection_type(),
@@ -129,7 +131,7 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 		.label = rpl::merge(
 			Core::App().settings().proxy().connectionTypeChanges(),
 			tr::lng_connection_auto_connecting() | rpl::to_empty
-		) | rpl::map(connectionType),
+		) | rpl::map([=] { return ConnectionTypeLabel(account); }),
 		.onClick = [=] {
 			controller->window().show(
 				ProxiesBoxController::CreateOwningBox(account));
@@ -1390,25 +1392,13 @@ void SetupConnectionType(
 		not_null<Window::Controller*> controller,
 		not_null<::Main::Account*> account,
 		not_null<Ui::VerticalLayout*> container) {
-	const auto connectionType = [=] {
-		const auto transport = account->mtp().dctransport();
-		if (!Core::App().settings().proxy().isEnabled()) {
-			return transport.isEmpty()
-				? tr::lng_connection_auto_connecting(tr::now)
-				: tr::lng_connection_auto(tr::now, lt_transport, transport);
-		} else {
-			return transport.isEmpty()
-				? tr::lng_connection_proxy_connecting(tr::now)
-				: tr::lng_connection_proxy(tr::now, lt_transport, transport);
-		}
-	};
 	const auto button = AddButtonWithLabel(
 		container,
 		tr::lng_settings_connection_type(),
 		rpl::merge(
 			Core::App().settings().proxy().connectionTypeChanges(),
 			tr::lng_connection_auto_connecting() | rpl::to_empty
-		) | rpl::map([=] { return connectionType(); }),
+		) | rpl::map([=] { return ConnectionTypeLabel(account); }),
 		st::settingsButton,
 		{ &st::menuIconNetwork });
 	button->addClickHandler([=] {

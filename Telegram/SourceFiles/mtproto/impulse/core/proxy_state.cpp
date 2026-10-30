@@ -584,4 +584,32 @@ State Decode(std::string_view text) {
 	return state;
 }
 
+std::vector<Server> AllServers(const State &state) {
+	auto result = std::vector<Server>();
+	result.insert(result.end(), state.manual.begin(), state.manual.end());
+	for (const Subscription &subscription : state.subscriptions) {
+		result.insert(
+			result.end(),
+			subscription.servers.begin(),
+			subscription.servers.end());
+	}
+	return result;
+}
+
+bool HasServer(const State &state, const std::string &id) {
+	for (const Server &server : state.manual) {
+		if (server.id == id) {
+			return true;
+		}
+	}
+	for (const Subscription &subscription : state.subscriptions) {
+		for (const Server &server : subscription.servers) {
+			if (server.id == id) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 } // namespace Impulse::ProxyState

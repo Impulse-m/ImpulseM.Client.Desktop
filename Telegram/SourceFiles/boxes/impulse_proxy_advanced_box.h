@@ -15,6 +15,11 @@ namespace Ui {
 class Show;
 } // namespace Ui
 
+// Proxied calls need the loopback relay, which is not shipped yet. While this
+// is false, the "Use VPN for" section is hidden and calls never go through
+// the proxy.
+inline constexpr auto kProxiedCallsRelayReady = false;
+
 // Advanced settings of the ImpulseM VLESS proxy: fragmentation, TLS
 // fingerprint, multiplexing, TCP options, DNS and server checks. Every
 // change is saved at once. Only a change of a setting that the Xray core

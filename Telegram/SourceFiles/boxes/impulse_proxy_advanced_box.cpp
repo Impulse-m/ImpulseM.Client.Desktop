@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "lang/lang_keys.h"
+#include "mtproto/impulse/core/proxy_state.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/effects/animations.h"
@@ -29,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 using Advanced = Impulse::ProxyState::Advanced;
+using State = Impulse::ProxyState::State;
 
 constexpr const char *kFragmentOff = "off";
 constexpr const char *kFragmentClassic = "classic";
@@ -258,6 +260,19 @@ void SaveAdvanced(const Advanced &advanced) {
 	Core::App().refreshGlobalProxy();
 }
 
+// Writes the whole VLESS state, the way the list box saves its own changes.
+void SaveState(State state) {
+	Core::App().settings().proxy().setImpulseProxyState(std::move(state));
+	Core::App().saveSettingsDelayed();
+	Core::App().refreshGlobalProxy();
+	// The Connection type row reads the VLESS state, so it refreshes too.
+	Core::App().settings().proxy().connectionTypeChangesNotify();
+}
+
+[[nodiscard]] bool ProxiedCallsAvailable() {
+	return kProxiedCallsRelayReady && Core::App().impulseXrayRunning();
+}
+
 // A box with one radio button per label. Picking a label closes the box.
 void ShowChoice(
 		const std::shared_ptr<Ui::Show> &show,
@@ -414,6 +429,74 @@ void ImpulseProxyAdvancedBox::setupContent() {
 			});
 		}, button->lifetime());
 	};
+
+	// Use VPN for. The section is hidden while the calls relay is not ready,
+	// and then the transport stays on.
+	rpl::variable<State> *const routes = Ui::CreateChild<rpl::variable<State>>(
+		content,
+		Core::App().settings().proxy().impulseProxyState());
+	if (!kProxiedCallsRelayReady
+			&& !Core::App().settings().proxy().impulseProxyState().useForTransport) {
+		// The transport cannot be switched off from here, so an older
+		// setting that left it off goes back on. The stored state is read
+		// again, so a change saved elsewhere is not overwritten.
+		State next = Core::App().settings().proxy().impulseProxyState();
+		next.useForTransport = true;
+		*routes = next;
+		SaveState(next);
+	}
+
+	Ui::SlideWrap<Ui::VerticalLayout> *const useFor = content->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			content,
+			object_ptr<Ui::VerticalLayout>(content)));
+	Ui::VerticalLayout *const useForRows = useFor->entity();
+	useFor->toggle(kProxiedCallsRelayReady, anim::type::instant);
+
+	// One switch of "Use VPN for". At least one of the two stays on, and
+	// calls can be switched on only when the relay is ready.
+	const auto addRoute = [=](
+			rpl::producer<QString> text,
+			bool State::*field) {
+		Ui::SettingsButton *const button = useForRows->add(object_ptr<Ui::SettingsButton>(
+			useForRows,
+			std::move(text),
+			st::settingsButtonNoIcon));
+		button->toggleOn(routes->value() | rpl::map(
+			[=](const State &value) {
+				return value.*field;
+			}));
+		button->toggledChanges() | rpl::on_next([=](bool checked) {
+			// The stored state is read on each change, not the snapshot of the
+			// box, so a change saved elsewhere is kept.
+			const State current = Core::App().settings().proxy().impulseProxyState();
+			if (checked == current.*field) {
+				return;
+			}
+			State next = current;
+			next.*field = checked;
+			if (!next.useForTransport && !next.useForCalls) {
+				// The switch goes back, and the toast says why.
+				routes->force_assign(current);
+				show->showToast(tr::lng_impulse_proxy_adv_use_for_need_one(tr::now));
+			} else if (checked
+				&& (field == &State::useForCalls)
+				&& !ProxiedCallsAvailable()) {
+				routes->force_assign(current);
+			} else {
+				*routes = next;
+				SaveState(next);
+			}
+		}, button->lifetime());
+	};
+	Ui::AddSubsectionTitle(useForRows, tr::lng_impulse_proxy_adv_use_for());
+	addRoute(
+		tr::lng_impulse_proxy_adv_use_for_transport(),
+		&State::useForTransport);
+	addRoute(
+		tr::lng_impulse_proxy_adv_use_for_calls(),
+		&State::useForCalls);
+	Ui::AddDividerText(useForRows, tr::lng_impulse_proxy_adv_use_for_info());
 
 	// Fragmentation.
 	Ui::AddSubsectionTitle(content, tr::lng_impulse_proxy_adv_fragmentation());

@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "storage/storage_media_prepare.h"
 #include "core/application.h"
+#include "core/impulse_features.h"
 #include "core/mime_type.h"
 #include "core/local_url_handlers.h"
 #include "styles/style_chat_helpers.h"
@@ -88,7 +89,7 @@ constexpr auto kDragAreaEvents = {
 		};
 		return (proxy(u"tg://proxy?"_q)
 			|| proxy(u"tg://socks?"_q)
-			|| proxy(u"tg://webproxy?"_q))
+			|| (ImpulseFeatures::PROXY && proxy(u"tg://webproxy?"_q)))
 			? local
 			: QString();
 	};

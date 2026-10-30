@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/connection_box.h"
 
-#include "base/call_delayed.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
@@ -23,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mtproto/facade.h"
 #include "mtproto/impulse/core/proxy_input.h"
+#include "mtproto/impulse/core/proxy_routing.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/proxy_check.h"
 #include "mtproto/web_proxy/web_proxy_transport.h"
@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/radial_animation.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/text/format_values.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
@@ -50,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/menu/menu_add_action_callback.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/tooltip.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/table_layout.h"
 #include "ui/wrap/vertical_layout.h"
@@ -68,27 +70,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QDateTime>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 #include <QtWidgets/QTextEdit>
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
 
-constexpr auto kSaveSettingsDelayedTimeout = crl::time(1000);
+// Automatic check rounds run at most this often while the box is open.
+constexpr auto kImpulseAutoCheckMs = crl::time(60000);
 
-// Proxied calls need the loopback relay, which is not shipped yet. Until it is,
-// the calls toggle stays visible but disabled, so calls never go through the
-// proxy.
-constexpr auto kProxiedCallsRelayReady = false;
-
-[[nodiscard]] bool ProxiedCallsAvailable() {
-	return kProxiedCallsRelayReady && Core::App().impulseXrayRunning();
-}
+// The Add box field grows up to this many lines, then it scrolls.
+constexpr auto kImpulseAddMaxLines = 4;
 
 using ProxyData = MTP::ProxyData;
 
@@ -389,61 +389,53 @@ void ShareProxy(
 	return ProxyData();
 }
 
-[[nodiscard]] QString ImpulseFetchError(const std::string &error) {
-	if (error.starts_with(Impulse::ProxyInput::kErrorHttp)) {
-		return tr::lng_impulse_proxy_list_error_http(
+// The text of a core or subscription error code, as the proxy list shows it.
+// An empty code means that the core is not running. A code that is not named
+// here shows the generic core error.
+[[nodiscard]] QString ImpulseErrorText(const std::string &code) {
+	namespace Xray = Impulse::Xray;
+	const std::string_view view = code;
+	const std::string_view http = Impulse::ProxyInput::kErrorHttp;
+	const std::string_view noLinks = Impulse::ProxyInput::kErrorNoLinks;
+	const std::string_view notFound = "err:subscriptionNotFound";
+	if (view.empty()) {
+		return tr::lng_impulse_proxy_error_not_running(tr::now);
+	} else if (view == Xray::ErrorCode(Xray::Error::NoServer)) {
+		return tr::lng_impulse_proxy_error_no_server(tr::now);
+	} else if (view == Xray::ErrorCode(Xray::Error::InvalidConfig)) {
+		return tr::lng_impulse_proxy_error_invalid_config(tr::now);
+	} else if (view == Xray::ErrorCode(Xray::Error::CoreStart)) {
+		return tr::lng_impulse_proxy_error_core_start(tr::now);
+	} else if (view == Xray::ErrorCode(Xray::Error::CoreStopped)) {
+		return tr::lng_impulse_proxy_error_core_stopped(tr::now);
+	} else if (view == Impulse::ProxyInput::kErrorInvalidSubscription) {
+		return tr::lng_impulse_proxy_error_invalid_subscription(tr::now);
+	} else if (view == notFound) {
+		return tr::lng_impulse_proxy_error_subscription_not_found(tr::now);
+	} else if (view == Impulse::ProxyInput::kErrorNetwork) {
+		return tr::lng_impulse_proxy_error_network(tr::now);
+	} else if (view.starts_with(std::string(http) + ':')) {
+		return tr::lng_impulse_proxy_error_http(
 			tr::now,
 			lt_code,
-			QString::fromStdString(
-				error.substr(Impulse::ProxyInput::kErrorHttp.size() + 1)));
-	} else if (error == Impulse::ProxyInput::kErrorNetwork) {
-		return tr::lng_impulse_proxy_list_error_network(tr::now);
-	} else if (error.starts_with(Impulse::ProxyInput::kErrorNoLinks)) {
-		return tr::lng_impulse_proxy_list_error_no_links(tr::now);
+			QString::fromStdString(code.substr(http.size() + 1)));
+	} else if (view == noLinks) {
+		return tr::lng_impulse_proxy_error_no_links(tr::now);
+	} else if (view.starts_with(std::string(noLinks) + ':')) {
+		const int skipped = QString::fromStdString(
+			code.substr(noLinks.size() + 1)).toInt();
+		return tr::lng_impulse_proxy_error_no_links_skipped(
+			tr::now,
+			lt_count,
+			skipped);
 	}
-	return tr::lng_impulse_proxy_list_error_invalid(tr::now);
-}
-
-[[nodiscard]] bool ImpulseHasServer(
-		const Impulse::ProxyState::State &state,
-		const std::string &id) {
-	for (const Impulse::ProxyState::Server &server : state.manual) {
-		if (server.id == id) {
-			return true;
-		}
-	}
-	for (const Impulse::ProxyState::Subscription &subscription
-			: state.subscriptions) {
-		for (const Impulse::ProxyState::Server &server
-				: subscription.servers) {
-			if (server.id == id) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-// Every server that the check measures: the manual ones, then the ones of
-// each subscription, in the order of the list.
-[[nodiscard]] std::vector<Impulse::ProxyState::Server> ImpulseAllServers(
-		const Impulse::ProxyState::State &state) {
-	auto result = std::vector<Impulse::ProxyState::Server>();
-	result.insert(result.end(), state.manual.begin(), state.manual.end());
-	for (const Impulse::ProxyState::Subscription &subscription
-			: state.subscriptions) {
-		result.insert(
-			result.end(),
-			subscription.servers.begin(),
-			subscription.servers.end());
-	}
-	return result;
+	return tr::lng_impulse_proxy_error_core(tr::now);
 }
 
 // The first server of the list, which the proxy picks when it is turned on.
 [[nodiscard]] std::optional<std::string> ImpulseFirstServerId(
 		const Impulse::ProxyState::State &state) {
-	const auto all = ImpulseAllServers(state);
+	const auto all = Impulse::ProxyState::AllServers(state);
 	if (all.empty()) {
 		return std::nullopt;
 	}
@@ -460,58 +452,115 @@ void ShowImpulseToast(
 
 void ShareImpulseLink(
 		const std::shared_ptr<Ui::Show> &show,
-		const QString &link,
-		bool qr) {
+		const QString &link) {
 	if (link.isEmpty() || !show) {
-		return;
-	}
-	if (qr) {
-		ShowProxyQrBox(show, link);
 		return;
 	}
 	TextUtilities::SetClipboardText(TextForMimeData::Simple(link));
 	show->showToast({
-		.text = { tr::lng_username_copied(tr::now) },
-		.iconLottie = u"toast/voip_invite"_q,
+		.text = { tr::lng_impulse_proxy_link_copied(tr::now) },
+		.iconLottie = u"toast/copy"_q,
 		.iconLottieSize = st::toastLottieIconSize,
 	});
 }
 
-// A box with one field for a vless:// link, several links or a subscription
-// URL. The text goes to the controller, which converts it.
+// A box with a field for vless:// links, several of them, or a subscription
+// URL. The text goes to the controller, which converts it. A subscription
+// keeps the box open with a loading state until it is downloaded. Cancel, or
+// closing the box, drops the result that comes later.
 void ShowImpulseAddBox(
 		const std::shared_ptr<Ui::Show> &show,
 		not_null<ProxiesBoxController*> controller) {
-	const base::weak_ptr<ProxiesBoxController> weak = base::make_weak(controller.get());
+	const base::weak_ptr<ProxiesBoxController> weak = base::make_weak(
+		controller.get());
 	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(tr::lng_impulse_proxy_list_add_title());
+		box->setTitle(tr::lng_impulse_proxy_add_title());
+		const auto weakBox = base::make_weak(box.get());
 
 		const auto inner = box->verticalLayout();
 		const auto field = inner->add(
 			object_ptr<Ui::InputField>(
 				inner,
 				st::defaultInputField,
-				tr::lng_impulse_proxy_list_add_placeholder(),
+				Ui::InputField::Mode::MultiLine,
+				tr::lng_impulse_proxy_add_hint(),
 				QString()),
 			st::boxRowPadding);
-		Ui::AddDividerText(
-			inner,
-			tr::lng_impulse_proxy_list_add_about());
+		const auto lineHeight = st::defaultInputField.style.font->height;
+		field->setMaxHeight(lineHeight * kImpulseAddMaxLines
+			+ st::defaultInputField.textMargins.top()
+			+ st::defaultInputField.textMargins.bottom());
 
+		const auto paste = inner->add(
+			object_ptr<Ui::LinkButton>(
+				inner,
+				tr::lng_impulse_proxy_paste(tr::now)),
+			st::boxRowPadding);
+		paste->setClickedCallback([=] {
+			field->setText(QGuiApplication::clipboard()->text().trimmed());
+			field->setFocusFast();
+		});
+
+		const auto errorLabel = inner->add(
+			object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
+				inner,
+				object_ptr<Ui::FlatLabel>(
+					inner,
+					QString(),
+					st::boxDividerLabel)),
+			st::boxRowPadding);
+		errorLabel->entity()->setTextColorOverride(st::boxTextFgError->c);
+		errorLabel->hide(anim::type::instant);
+
+		const auto showError = [=](const QString &message) {
+			errorLabel->entity()->setText(message);
+			errorLabel->toggle(true, anim::type::normal);
+			field->showError();
+		};
+		field->changes() | rpl::on_next([=] {
+			errorLabel->toggle(false, anim::type::normal);
+			field->hideError();
+		}, field->lifetime());
+
+		box->setFocusCallback([=] { field->setFocusFast(); });
+
+		const auto submitButton = box->addButton(
+			tr::lng_impulse_proxy_add_submit(),
+			[] {});
+		const auto setBusy = [=](bool busy) {
+			field->setEnabled(!busy);
+			submitButton->setDisabled(busy);
+			box->showLoading(busy);
+		};
 		const auto submit = [=] {
 			const auto text = field->getLastText().trimmed();
 			if (text.isEmpty()) {
-				field->showError();
+				showError(tr::lng_impulse_proxy_invalid(tr::now));
 				return;
 			}
-			if (ProxiesBoxController *const strong = weak.get()) {
-				strong->importText(text);
+			ProxiesBoxController *const strong = weak.get();
+			if (!strong) {
+				box->closeBox();
+				return;
 			}
-			box->closeBox();
+			setBusy(true);
+			strong->importImpulseText(
+				text,
+				[=] { return weakBox.get() != nullptr; },
+				[=](QString message) {
+					const auto stillOpen = weakBox.get();
+					if (!stillOpen) {
+						return;
+					} else if (message.isEmpty()) {
+						stillOpen->closeBox();
+						return;
+					}
+					setBusy(false);
+					showError(message);
+				});
 		};
+		submitButton->setClickedCallback(submit);
 		field->submits() | rpl::on_next(submit, field->lifetime());
-		box->setFocusCallback([=] { field->setFocusFast(); });
-		box->addButton(tr::lng_proxy_add(), submit);
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	}));
 }
@@ -525,13 +574,7 @@ public:
 
 	void updateFields(View &&view);
 
-	rpl::producer<> deleteClicks() const;
-	rpl::producer<> restoreClicks() const;
-	rpl::producer<> editClicks() const;
-	rpl::producer<> shareClicks() const;
-	rpl::producer<> showQrClicks() const;
-	rpl::producer<> openBrowserClicks() const;
-	rpl::producer<> refreshClicks() const;
+	rpl::producer<> detailsClicks() const;
 
 protected:
 	int resizeGetHeight(int newWidth) override;
@@ -543,20 +586,12 @@ private:
 	int countAvailableWidth() const;
 	void radialAnimationCallback();
 	void paintCheck(Painter &p);
-	void showMenu();
 
 	View _view;
 
 	Ui::Text::String _title;
 	object_ptr<Ui::IconButton> _menuToggle;
-	rpl::event_stream<> _deleteClicks;
-	rpl::event_stream<> _restoreClicks;
-	rpl::event_stream<> _editClicks;
-	rpl::event_stream<> _shareClicks;
-	rpl::event_stream<> _showQrClicks;
-	rpl::event_stream<> _openBrowserClicks;
-	rpl::event_stream<> refreshClickStream;
-	base::unique_qptr<Ui::DropdownMenu> _menu;
+	rpl::event_stream<> _detailsClicks;
 
 	bool _set = false;
 	Ui::Animations::Simple _toggled;
@@ -569,10 +604,10 @@ private:
 
 };
 
-// The ImpulseM VLESS list: the enable switch, the two transport toggles, the
-// manual servers and the subscriptions with their servers, and the check,
-// advanced settings and share actions. Rows are rebuilt from the proxy state
-// whenever the list, the core status or a check changes.
+// The ImpulseM VLESS list, as Android ImpulseProxyActivity lays it out: the
+// use switch with its status, the advanced settings, my links, and one block
+// per subscription. Rows are rebuilt from the proxy state whenever the list,
+// the core status, the route or a check changes.
 class ProxiesBox : public Ui::BoxContent {
 public:
 	ProxiesBox(
@@ -587,75 +622,219 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 
 private:
-	// What one row stands for. The index in rowKeys is the row id.
-	struct RowKey {
-		enum class Kind {
-			Manual,
-			Member,
-			Subscription,
-		};
-
-		Kind kind = Kind::Manual;
-		std::string id;
-	};
-
 	void setupContent();
 	void setupTopButton();
 	void addNewProxy();
+	void refreshAll();
+	void refreshUse();
+	void refreshStatus();
 	void rebuildRows();
 	void addServerRow(
 		not_null<Ui::VerticalLayout*> wrap,
 		const Impulse::ProxyState::State &state,
 		const Impulse::ProxyState::Server &server,
-		RowKey::Kind kind);
-	void addSubscriptionRow(
+		bool manual);
+	void addSubscription(
 		not_null<Ui::VerticalLayout*> wrap,
+		const Impulse::ProxyState::State &state,
 		const Impulse::ProxyState::Subscription &subscription);
-	void setupRowButtons(int id, not_null<ProxyRow*> button);
-	void refreshControls();
 	int rowHeight() const;
 
 	not_null<ProxiesBoxController*> _controller;
 	Core::SettingsProxy &_settings;
-	QPointer<Ui::Checkbox> enabledToggle;
-	QPointer<Ui::Checkbox> transportToggle;
-	QPointer<Ui::SlideWrap<Ui::Checkbox>> callsToggle;
-	QPointer<Ui::DividerLabel> _about;
+	rpl::variable<bool> _useValue{ false };
+	QPointer<Ui::FlatLabel> _status;
 	QPointer<Ui::VerticalLayout> _wrap;
-	QPointer<Ui::SlideWrap<Ui::VerticalLayout>> shareListWrap;
-	std::vector<RowKey> rowKeys;
 
 	QPointer<Ui::RpWidget> _addProxyButton;
-	QPointer<Ui::RpWidget> _shareListButton;
 	QString _highlightId;
 
 };
 
-// Edits one manual server of the ImpulseM list: its name and its vless://
-// link. A changed link is converted again, and the server keeps its place in
-// the list. Check measures this server alone; Use turns the proxy on with it.
-class ProxyBox final : public Ui::BoxContent {
-public:
-	ProxyBox(
-		QWidget*,
-		base::weak_ptr<ProxiesBoxController> controller,
-		Impulse::ProxyState::Server initial);
+[[nodiscard]] QString ImpulseEndpointText(const Impulse::ProxyState::Server &server) {
+	return QString::fromStdString(server.host)
+		+ ':'
+		+ QString::number(server.port);
+}
 
-protected:
-	void prepare() override;
-	void setInnerFocus() override;
+// The name of a server, or its host and port when the name is empty.
+[[nodiscard]] QString ImpulseServerName(const Impulse::ProxyState::Server &server) {
+	const auto name = QString::fromStdString(server.name).trimmed();
+	return name.isEmpty() ? ImpulseEndpointText(server) : name;
+}
 
-private:
-	void save();
-	void check();
-	void use();
+// The security and the network of a server, as the details show them, for
+// example "REALITY · TCP". Xray's raw network is TCP.
+[[nodiscard]] QString ImpulseTransportText(const Impulse::ProxyState::Server &server) {
+	const auto security = QString::fromStdString(server.security);
+	const auto network = QString::fromStdString(server.network);
+	const auto networkName = (network == u"raw"_q)
+		? u"TCP"_q
+		: network.toUpper();
+	const auto secured = !security.isEmpty() && security != u"none"_q;
+	if (!secured) {
+		return networkName;
+	} else if (networkName.isEmpty()) {
+		return security.toUpper();
+	}
+	return security.toUpper()
+		+ u" "_q + QChar(0x00B7) + u" "_q
+		+ networkName;
+}
 
-	const base::weak_ptr<ProxiesBoxController> weakController;
-	const Impulse::ProxyState::Server server;
-	QPointer<Ui::InputField> nameInput;
-	QPointer<Ui::InputField> linkInput;
+// The title of a subscription: the name from its panel, then the host of its
+// URL, then the URL itself.
+[[nodiscard]] QString ImpulseSubscriptionTitle(
+		const Impulse::ProxyState::Subscription &subscription) {
+	if (subscription.meta.title && !subscription.meta.title->empty()) {
+		return QString::fromStdString(*subscription.meta.title);
+	}
+	const auto host = QUrl(QString::fromStdString(subscription.url)).host();
+	return host.isEmpty()
+		? QString::fromStdString(subscription.url)
+		: host;
+}
 
-};
+// Whether the main traffic goes through the core now. Only then the selected
+// row and the status say "Connected".
+[[nodiscard]] bool ImpulseConnected(const Impulse::ProxyState::State &state) {
+	return Impulse::ProxyRouting::Decide(
+		state.enabled,
+		state.useForTransport,
+		Core::App().impulseXrayRunning()) == Impulse::ProxyRouting::Route::Proxy;
+}
+
+[[nodiscard]] bool ImpulseServerInUse(
+		const Impulse::ProxyState::State &state,
+		const std::string &id) {
+	return state.enabled && state.selectedId && *state.selectedId == id;
+}
+
+[[nodiscard]] bool ImpulseSubscriptionInUse(
+		const Impulse::ProxyState::State &state,
+		const Impulse::ProxyState::Subscription &subscription) {
+	if (!state.enabled || !state.selectedId) {
+		return false;
+	}
+	return std::any_of(
+		subscription.servers.begin(),
+		subscription.servers.end(),
+		[&](const Impulse::ProxyState::Server &server) {
+			return server.id == *state.selectedId;
+		});
+}
+
+// Confirms the removal of a manual server. The warning is added when the proxy
+// uses the server, as Android confirmDelete does.
+void ShowImpulseDeleteServer(
+		const std::shared_ptr<Ui::Show> &show,
+		const base::weak_ptr<ProxiesBoxController> &controller,
+		const std::string &id,
+		const QString &name,
+		bool inUse) {
+	auto text = tr::lng_impulse_proxy_delete_server_text(
+		tr::now,
+		lt_name,
+		name);
+	if (inUse) {
+		text += u"\n\n"_q
+			+ tr::lng_impulse_proxy_delete_active_server(tr::now);
+	}
+	show->showBox(Ui::MakeConfirmBox({
+		.text = text,
+		.confirmed = [=] {
+			if (ProxiesBoxController *const strong = controller.get()) {
+				strong->deleteImpulseServer(id);
+			}
+		},
+		.confirmText = tr::lng_impulse_proxy_delete(),
+		.confirmStyle = &st::attentionBoxButton,
+		.title = tr::lng_impulse_proxy_delete_server_title(),
+	}));
+}
+
+// Confirms the removal of a subscription and all its servers.
+void ShowImpulseDeleteSubscription(
+		const std::shared_ptr<Ui::Show> &show,
+		const base::weak_ptr<ProxiesBoxController> &controller,
+		const std::string &id,
+		const QString &title,
+		bool inUse) {
+	auto text = tr::lng_impulse_proxy_delete_subscription_text(
+		tr::now,
+		lt_title,
+		title);
+	if (inUse) {
+		text += u"\n\n"_q
+			+ tr::lng_impulse_proxy_delete_active_subscription(tr::now);
+	}
+	show->showBox(Ui::MakeConfirmBox({
+		.text = text,
+		.confirmed = [=] {
+			if (ProxiesBoxController *const strong = controller.get()) {
+				strong->deleteImpulseSubscription(id);
+			}
+		},
+		.confirmText = tr::lng_impulse_proxy_delete(),
+		.confirmStyle = &st::attentionBoxButton,
+		.title = tr::lng_impulse_proxy_delete_subscription_title(),
+	}));
+}
+
+// The details of one server: its endpoint and transport, the copy of its link
+// and, for a manual server, its removal. Android showServerInfo.
+void ShowImpulseServerDetails(
+		const std::shared_ptr<Ui::Show> &show,
+		not_null<ProxiesBoxController*> controller,
+		const std::string &id,
+		bool manual) {
+	const std::optional<Impulse::ProxyState::Server> found
+		= controller->impulseServer(id);
+	if (!found) {
+		return;
+	}
+	const Impulse::ProxyState::Server server = *found;
+	const base::weak_ptr<ProxiesBoxController> weak = base::make_weak(
+		controller.get());
+	show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(ImpulseServerName(server)));
+
+		const auto inner = box->verticalLayout();
+		inner->add(
+			object_ptr<Ui::FlatLabel>(
+				inner,
+				ImpulseEndpointText(server)
+					+ '\n'
+					+ ImpulseTransportText(server),
+				st::boxLabel),
+			st::boxRowPadding);
+
+		if (server.shareLink) {
+			const QString link = QString::fromStdString(*server.shareLink);
+			box->addLeftButton(tr::lng_impulse_proxy_copy_link(), [=] {
+				ShareImpulseLink(show, link);
+			});
+		}
+		box->addButton(tr::lng_impulse_proxy_close(), [=] {
+			box->closeBox();
+		});
+		if (manual) {
+			box->addButton(tr::lng_impulse_proxy_delete(), [=] {
+				box->closeBox();
+				ProxiesBoxController *const strong = weak.get();
+				if (!strong) {
+					return;
+				}
+				ShowImpulseDeleteServer(
+					show,
+					weak,
+					id,
+					ImpulseServerName(server),
+					ImpulseServerInUse(strong->impulseState(), id));
+			}, st::attentionBoxButton);
+		}
+	}));
+}
 
 ProxyRow::ProxyRow(QWidget *parent, View &&view)
 : RippleButton(parent, st::proxyRowRipple)
@@ -663,32 +842,8 @@ ProxyRow::ProxyRow(QWidget *parent, View &&view)
 	setupControls(std::move(view));
 }
 
-rpl::producer<> ProxyRow::deleteClicks() const {
-	return _deleteClicks.events();
-}
-
-rpl::producer<> ProxyRow::restoreClicks() const {
-	return _restoreClicks.events();
-}
-
-rpl::producer<> ProxyRow::editClicks() const {
-	return _editClicks.events();
-}
-
-rpl::producer<> ProxyRow::shareClicks() const {
-	return _shareClicks.events();
-}
-
-rpl::producer<> ProxyRow::showQrClicks() const {
-	return _showQrClicks.events();
-}
-
-rpl::producer<> ProxyRow::openBrowserClicks() const {
-	return _openBrowserClicks.events();
-}
-
-rpl::producer<> ProxyRow::refreshClicks() const {
-	return refreshClickStream.events();
+rpl::producer<> ProxyRow::detailsClicks() const {
+	return _detailsClicks.events();
 }
 
 void ProxyRow::setupControls(View &&view) {
@@ -696,7 +851,7 @@ void ProxyRow::setupControls(View &&view) {
 	_toggled.stop();
 	_setAnimation.stop();
 
-	_menuToggle->addClickHandler([=] { showMenu(); });
+	_menuToggle->addClickHandler([=] { _detailsClicks.fire({}); });
 }
 
 int ProxyRow::countAvailableWidth() const {
@@ -712,15 +867,9 @@ void ProxyRow::updateFields(View &&view) {
 			st::defaultRadio.duration);
 	}
 	_view = std::move(view);
-	const auto endpoint = (_view.web || _view.port == 0)
-		? _view.host
-		: _view.host + ':' + QString::number(_view.port);
 	_title.setMarkedText(
 		st::proxyRowTitleStyle,
-		TextWithEntities()
-			.append(_view.type)
-			.append(' ')
-			.append(tr::link(endpoint, QString())),
+		TextWithEntities().append(_view.name),
 		Ui::ItemTextDefaultOptions());
 
 	const auto state = _view.state;
@@ -754,7 +903,7 @@ void ProxyRow::updateFields(View &&view) {
 			st::defaultRadio.duration);
 	}
 
-	setPointerCursor(!_view.deleted);
+	setPointerCursor(true);
 
 	update();
 }
@@ -786,17 +935,11 @@ int ProxyRow::resizeGetHeight(int newWidth) {
 void ProxyRow::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	if (!_view.deleted) {
-		paintRipple(p, 0, 0);
-	}
+	paintRipple(p, 0, 0);
 
 	const auto left = _skipLeft;
 	const auto availableWidth = countAvailableWidth();
 	auto top = st::proxyRowPadding.top();
-
-	if (_view.deleted) {
-		p.setOpacity(st::stickersRowDisabledOpacity);
-	}
 
 	paintCheck(p);
 
@@ -812,8 +955,6 @@ void ProxyRow::paintEvent(QPaintEvent *e) {
 			return st::proxyRowStatusFgOnline;
 		case State::Unavailable:
 			return st::proxyRowStatusFgOffline;
-		case State::WaitingForBrowser:
-			return st::proxyRowStatusFg;
 		case State::Available:
 			return st::proxyRowStatusFgAvailable;
 		default:
@@ -823,26 +964,29 @@ void ProxyRow::paintEvent(QPaintEvent *e) {
 	const auto status = [&] {
 		switch (_view.state) {
 		case State::Available:
-			return tr::lng_proxy_available(
+			return tr::lng_impulse_proxy_available(
 				tr::now,
 				lt_ping,
 				QString::number(_view.ping));
 		case State::Checking:
-			return tr::lng_proxy_checking(tr::now);
+			return tr::lng_impulse_proxy_checking(tr::now);
 		case State::NotTested:
-			return tr::lng_proxy_not_tested(tr::now);
+			return tr::lng_impulse_proxy_not_checked(tr::now);
 		case State::Connecting:
-			return tr::lng_proxy_connecting(tr::now);
+			return tr::lng_impulse_proxy_connecting(tr::now);
 		case State::Online:
-			return tr::lng_proxy_online(tr::now);
+			return (_view.ping >= 0)
+				? tr::lng_impulse_proxy_connected_ping(
+					tr::now,
+					lt_ping,
+					QString::number(_view.ping))
+				: tr::lng_impulse_proxy_status_connected(tr::now);
 		case State::Unavailable:
-			return tr::lng_proxy_unavailable(tr::now);
-		case State::WaitingForBrowser:
-			return tr::lng_proxy_web_waiting(tr::now);
+			return tr::lng_impulse_proxy_unavailable(tr::now);
 		}
 		Unexpected("State in ProxyRow::paintEvent.");
 	}();
-	p.setPen(_view.deleted ? st::proxyRowStatusFg : statusFg);
+	p.setPen(statusFg);
 	p.setFont(st::normalFont);
 
 	auto statusLeft = left;
@@ -905,108 +1049,6 @@ void ProxyRow::paintCheck(Painter &p) {
 	}
 }
 
-void ProxyRow::showMenu() {
-	if (_menu) {
-		return;
-	}
-	const auto hasActions = _view.editable
-		|| _view.supportsShare
-		|| _view.refreshable
-		|| _view.deletable
-		|| _view.deleted;
-	if (!hasActions) {
-		return;
-	}
-	_menu = base::make_unique_q<Ui::DropdownMenu>(
-		window(),
-		st::dropdownMenuWithIcons);
-	const auto weak = _menu.get();
-	_menu->setHiddenCallback([=] {
-		weak->deleteLater();
-		if (_menu == weak) {
-			_menuToggle->setForceRippled(false);
-		}
-	});
-	_menu->setShowStartCallback([=] {
-		if (_menu == weak) {
-			_menuToggle->setForceRippled(true);
-		}
-	});
-	_menu->setHideStartCallback([=] {
-		if (_menu == weak) {
-			_menuToggle->setForceRippled(false);
-		}
-	});
-	_menuToggle->installEventFilter(_menu);
-	const auto addAction = [&](
-			const QString &text,
-			Fn<void()> callback,
-			const style::icon *icon) {
-		return _menu->addAction(text, std::move(callback), icon);
-	};
-	if (_view.refreshable) {
-		addAction(tr::lng_impulse_proxy_list_refresh(tr::now), [=] {
-			refreshClickStream.fire({});
-		}, &st::menuIconRestore);
-	}
-	if (_view.canOpenBrowser) {
-		addAction(tr::lng_proxy_web_open(tr::now), [=] {
-			_openBrowserClicks.fire({});
-		}, &st::menuIconLink);
-	}
-	if (_view.editable) {
-		addAction(tr::lng_proxy_menu_edit(tr::now), [=] {
-			_editClicks.fire({});
-		}, &st::menuIconEdit);
-	}
-	if (_view.supportsShare) {
-		addAction(tr::lng_proxy_edit_share(tr::now), [=] {
-			_shareClicks.fire({});
-		}, &st::menuIconShare);
-		addAction(tr::lng_group_invite_context_qr(tr::now), [=] {
-			_showQrClicks.fire({});
-		}, &st::menuIconQrCode);
-	}
-	if (_view.deleted) {
-		addAction(tr::lng_proxy_menu_restore(tr::now), [=] {
-			_restoreClicks.fire({});
-		}, &st::menuIconRestore);
-	} else if (_view.deletable) {
-		addAction(tr::lng_proxy_menu_delete(tr::now), [=] {
-			_deleteClicks.fire({});
-		}, &st::menuIconDelete);
-	}
-	const auto parentTopLeft = window()->mapToGlobal(QPoint());
-	const auto buttonTopLeft = _menuToggle->mapToGlobal(QPoint());
-	const auto parent = QRect(parentTopLeft, window()->size());
-	const auto button = QRect(buttonTopLeft, _menuToggle->size());
-	const auto bottom = button.y()
-		+ st::proxyDropdownDownPosition.y()
-		+ _menu->height()
-		- parent.y();
-	const auto top = button.y()
-		+ st::proxyDropdownUpPosition.y()
-		- _menu->height()
-		- parent.y();
-	if (bottom > parent.height() && top >= 0) {
-		const auto left = button.x()
-			+ button.width()
-			+ st::proxyDropdownUpPosition.x()
-			- _menu->width()
-			- parent.x();
-		_menu->move(left, top);
-		_menu->showAnimated(Ui::PanelAnimation::Origin::BottomRight);
-	} else {
-		const auto left = button.x()
-			+ button.width()
-			+ st::proxyDropdownDownPosition.x()
-			- _menu->width()
-			- parent.x();
-		_menu->move(left, bottom - _menu->height());
-		_menu->showAnimated(Ui::PanelAnimation::Origin::TopRight);
-	}
-}
-
 ProxiesBox::ProxiesBox(
 	QWidget*,
 	not_null<ProxiesBoxController*> controller,
@@ -1023,20 +1065,28 @@ void ProxiesBox::keyPressEvent(QKeyEvent *e) {
 		_controller->shareImpulseList();
 	} else if (e->key() == Qt::Key_Paste
 		|| (e->key() == Qt::Key_V && e->modifiers() == Qt::ControlModifier)) {
-		_controller->importText(QGuiApplication::clipboard()->text());
+		const auto show = uiShow();
+		_controller->importImpulseText(
+			QGuiApplication::clipboard()->text(),
+			[] { return true; },
+			[=](QString message) {
+				if (!message.isEmpty()) {
+					ShowImpulseToast(show, message);
+				}
+			});
 	} else {
 		BoxContent::keyPressEvent(e);
 	}
 }
 
 void ProxiesBox::prepare() {
-	setTitle(tr::lng_proxy_settings());
+	setTitle(tr::lng_impulse_proxy_title());
 
-	_addProxyButton = addButton(tr::lng_proxy_add(), [=] { addNewProxy(); });
-	addButton(tr::lng_close(), [=] { closeBox(); });
+	addButton(tr::lng_impulse_proxy_close(), [=] { closeBox(); });
 
 	setupTopButton();
 	setupContent();
+	_controller->startImpulseAutoChecks();
 }
 
 void ProxiesBox::showFinished() {
@@ -1047,104 +1097,53 @@ void ProxiesBox::showFinished() {
 				_addProxyButton,
 				{ .rippleShape = true });
 		}
-	} else if (_highlightId == u"proxy/share-list"_q) {
-		if (_shareListButton) {
-			_highlightId = QString();
-			Settings::HighlightWidget(_shareListButton);
-		}
 	}
 }
 
 void ProxiesBox::setupTopButton() {
-	const auto top = addTopButton(st::infoTopBarMenu);
-	const auto state = top->lifetime().make_state<TopButtonMenuState>();
-
+	const auto top = addTopButton(st::proxyCheckTopButton);
+	Ui::InstallTooltip(top.data(), [] {
+		return tr::lng_impulse_proxy_list_check(tr::now);
+	});
+	const not_null<ProxiesBoxController*> controller = _controller;
 	top->setClickedCallback([=] {
-		state->menu = base::make_unique_q<Ui::PopupMenu>(
-			top,
-			st::popupMenuWithIcons);
-		const auto raw = state->menu.get();
-		const auto addAction = Ui::Menu::CreateAddActionCallback(raw);
-		addAction({
-			.text = tr::lng_proxy_add_from_clipboard(tr::now),
-			.handler = [=] {
-				_controller->importText(QGuiApplication::clipboard()->text());
-			},
-			.icon = &st::menuIconImportTheme,
-		});
-		raw->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
-		top->setForceRippled(true);
-		raw->setDestroyedCallback([=] {
-			if (!state->closing) {
-				top->setForceRippled(false);
-			}
-		});
-		raw->popup(
-			top->mapToGlobal(
-				QPoint(top->width(), top->height() - st::lineWidth * 3)));
-		return true;
+		controller->checkImpulseServers();
 	});
 }
 
 void ProxiesBox::setupContent() {
 	const auto inner = setInnerWidget(object_ptr<Ui::VerticalLayout>(this));
+	const not_null<ProxiesBoxController*> controller = _controller;
 
-	const Impulse::ProxyState::State &startState = _settings.impulseProxyState();
-	Ui::Checkbox *const enabled = inner->add(
-		object_ptr<Ui::Checkbox>(
+	// The switch follows the state. A tap that the rules refuse is undone by
+	// setting the value again, which the switch shows as a change back.
+	Ui::SettingsButton *const use = inner->add(
+		object_ptr<Ui::SettingsButton>(
 			inner,
-			tr::lng_proxy_use_custom(tr::now),
-			startState.enabled),
+			tr::lng_impulse_proxy_use(),
+			st::settingsButtonNoIcon));
+	use->toggleOn(_useValue.value());
+	use->toggledChanges() | rpl::on_next([=](bool checked) {
+		const Impulse::ProxyState::State state = controller->impulseState();
+		if (checked == state.enabled) {
+			return;
+		} else if (checked && Impulse::ProxyState::AllServers(state).empty()) {
+			// Android opens the Add box when there is no server at all, and
+			// the switch stays off.
+			_useValue.force_assign(false);
+			ShowImpulseAddBox(uiShow(), controller);
+			return;
+		}
+		controller->setImpulseEnabled(checked);
+	}, use->lifetime());
+
+	_status = inner->add(
+		object_ptr<Ui::FlatLabel>(
+			inner,
+			QString(),
+			st::defaultFlatLabel),
 		st::proxyUsePadding);
-	Ui::Checkbox *const transport = inner->add(
-		object_ptr<Ui::Checkbox>(
-			inner,
-			tr::lng_impulse_proxy_list_transport(tr::now),
-			startState.useForTransport),
-		st::proxyUsePadding);
-	Ui::SlideWrap<Ui::Checkbox> *const calls = inner->add(
-		object_ptr<Ui::SlideWrap<Ui::Checkbox>>(
-			inner,
-			object_ptr<Ui::Checkbox>(
-				inner,
-				tr::lng_proxy_use_for_calls(tr::now),
-				startState.useForCalls),
-			style::margins(
-				0,
-				st::proxyUsePadding.top(),
-				0,
-				st::proxyUsePadding.bottom())),
-		style::margins(
-			st::proxyTryIPv6Padding.left(),
-			0,
-			st::proxyTryIPv6Padding.right(),
-			st::proxyTryIPv6Padding.top()));
-	enabledToggle = enabled;
-	transportToggle = transport;
-	callsToggle = calls;
 
-	_about = inner->add(
-		object_ptr<Ui::DividerLabel>(
-			inner,
-			object_ptr<Ui::FlatLabel>(
-				inner,
-				tr::lng_proxy_about(tr::now),
-				st::boxDividerLabel),
-			st::proxyAboutPadding),
-		style::margins(0, 0, 0, st::proxyRowPadding.top()));
-
-	_wrap = inner->add(object_ptr<Ui::VerticalLayout>(inner));
-	inner->add(object_ptr<Ui::FixedHeightWidget>(
-		inner,
-		st::proxyRowPadding.bottom()));
-
-	Settings::AddButtonWithIcon(
-		inner,
-		tr::lng_impulse_proxy_list_check(),
-		st::settingsButton
-	)->setClickedCallback([=] {
-		_controller->checkImpulseServers();
-	});
 	Settings::AddButtonWithIcon(
 		inner,
 		tr::lng_impulse_proxy_list_advanced(),
@@ -1152,75 +1151,54 @@ void ProxiesBox::setupContent() {
 	)->setClickedCallback([=] {
 		ShowImpulseProxyAdvancedBox(uiShow());
 	});
+	Ui::AddSkip(inner);
 
-	{
-		Ui::SlideWrap<Ui::VerticalLayout> *const wrap = inner->add(
-			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-				inner,
-				object_ptr<Ui::VerticalLayout>(inner)));
-		shareListWrap = wrap;
-		Settings::Button *const shareList = Settings::AddButtonWithIcon(
-			wrap->entity(),
-			tr::lng_proxy_edit_share_list_button(),
-			st::settingsButton,
-			{ &st::menuIconCopy });
-		_shareListButton = shareList;
-		shareList->setClickedCallback([=] {
-			_controller->shareImpulseList();
-		});
-		wrap->finishAnimating();
-	}
+	_wrap = inner->add(object_ptr<Ui::VerticalLayout>(inner));
 
-	enabled->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		_controller->setImpulseEnabled(checked);
-	}, enabled->lifetime());
-	transport->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		if (!_controller->setImpulseUseForTransport(checked)) {
-			transport->setChecked(
-				!checked,
-				Ui::Checkbox::NotifyAboutChange::DontNotify);
-		}
-	}, transport->lifetime());
-	calls->entity()->checkedChanges(
-	) | rpl::on_next([=](bool checked) {
-		if (!_controller->setImpulseUseForCalls(checked)) {
-			calls->entity()->setChecked(
-				!checked,
-				Ui::Checkbox::NotifyAboutChange::DontNotify);
-		}
-	}, calls->lifetime());
-
-	// Rows are rebuilt after the event that changed them, because that event
-	// can come from one of the rows, which must not be deleted in its handler.
+	// The rows, the status and the switch are rebuilt after the event that
+	// changed them, because that event can come from one of the rows, which
+	// must not be deleted in its handler.
 	_controller->impulseChanges(
 	) | rpl::on_next([=] {
 		Ui::PostponeCall(this, [=] {
-			refreshControls();
-			rebuildRows();
+			refreshAll();
 		});
 	}, inner->lifetime());
 	Core::App().impulseProxy().stateValue(
 	) | rpl::on_next([=](Impulse::Xray::Status) {
 		Ui::PostponeCall(this, [=] {
-			rebuildRows();
+			refreshAll();
+		});
+	}, inner->lifetime());
+	Core::App().impulseProxy().errorValue(
+	) | rpl::on_next([=](Impulse::Xray::Error) {
+		Ui::PostponeCall(this, [=] {
+			refreshAll();
+		});
+	}, inner->lifetime());
+	Core::App().impulseProxy().routeValue(
+	) | rpl::on_next([=](Impulse::ProxyRouting::Route) {
+		Ui::PostponeCall(this, [=] {
+			refreshAll();
+		});
+	}, inner->lifetime());
+	// A round can finish after the box was reopened, so the rows follow the
+	// service and not the controller that started the round.
+	Core::App().impulseProxy().checkFinishedValue(
+	) | rpl::on_next([=] {
+		Ui::PostponeCall(this, [=] {
+			refreshAll();
 		});
 	}, inner->lifetime());
 
-	refreshControls();
-	rebuildRows();
-	calls->finishAnimating();
-	shareListWrap->finishAnimating();
+	refreshAll();
 
 	inner->resizeToWidth(st::boxWideWidth);
 
 	inner->heightValue(
 	) | rpl::map([=](int height) {
 		return std::min(
-			std::max(height, _about->y()
-				+ _about->height()
-				+ 3 * rowHeight()),
+			std::max(height, 3 * rowHeight()),
 			st::boxMaxListHeight);
 	}) | rpl::distinct_until_changed(
 	) | rpl::on_next([=](int height) {
@@ -1228,34 +1206,42 @@ void ProxiesBox::setupContent() {
 	}, inner->lifetime());
 }
 
-void ProxiesBox::refreshControls() {
-	const Impulse::ProxyState::State &state = _settings.impulseProxyState();
-	if (enabledToggle) {
-		enabledToggle->setChecked(
-			state.enabled,
-			Ui::Checkbox::NotifyAboutChange::DontNotify);
+void ProxiesBox::refreshAll() {
+	refreshUse();
+	refreshStatus();
+	rebuildRows();
+}
+
+void ProxiesBox::refreshUse() {
+	_useValue = _settings.impulseProxyState().enabled;
+}
+
+// The line under the switch, from the state and the core, as Android
+// overallStatusItem does.
+void ProxiesBox::refreshStatus() {
+	if (!_status) {
+		return;
 	}
-	if (transportToggle) {
-		transportToggle->setChecked(
-			state.useForTransport,
-			Ui::Checkbox::NotifyAboutChange::DontNotify);
+	const Impulse::ProxyState::State state = _settings.impulseProxyState();
+	auto text = QString();
+	const style::color *color = &st::windowSubTextFg;
+	const Impulse::Xray::Error error = Core::App().impulseProxy().error();
+	if (!state.enabled) {
+		text = tr::lng_impulse_proxy_status_off(tr::now);
+	} else if (error != Impulse::Xray::Error::None) {
+		text = tr::lng_impulse_proxy_status_error(
+			tr::now,
+			lt_reason,
+			ImpulseErrorText(std::string(Impulse::Xray::ErrorCode(error))));
+		color = &st::boxTextFgError;
+	} else if (ImpulseConnected(state)) {
+		text = tr::lng_impulse_proxy_status_connected(tr::now);
+		color = &st::windowActiveTextFg;
+	} else {
+		text = tr::lng_impulse_proxy_connecting(tr::now);
 	}
-	if (callsToggle) {
-		callsToggle->entity()->setChecked(
-			state.useForCalls,
-			Ui::Checkbox::NotifyAboutChange::DontNotify);
-		callsToggle->entity()->setDisabled(!ProxiedCallsAvailable());
-		callsToggle->toggle(state.enabled, anim::type::normal);
-	}
-	if (shareListWrap) {
-		const bool hasShare = std::any_of(
-			state.manual.begin(),
-			state.manual.end(),
-			[](const Impulse::ProxyState::Server &server) {
-				return server.shareLink.has_value();
-			});
-		shareListWrap->toggle(hasShare, anim::type::normal);
-	}
+	_status->setText(text);
+	_status->setTextColorOverride(color->c);
 }
 
 int ProxiesBox::rowHeight() const {
@@ -1276,27 +1262,27 @@ void ProxiesBox::rebuildRows() {
 	}
 	Ui::VerticalLayout *const wrap = _wrap.data();
 	wrap->clear();
-	rowKeys.clear();
 
-	const Impulse::ProxyState::State &state = _settings.impulseProxyState();
-	for (const Impulse::ProxyState::Server &server : state.manual) {
-		addServerRow(wrap, state, server, RowKey::Kind::Manual);
+	const Impulse::ProxyState::State state = _settings.impulseProxyState();
+	Ui::AddSubsectionTitle(wrap, tr::lng_impulse_proxy_my_links());
+	for (const Impulse::ProxyState::Server &server
+			: _controller->impulseSortedBlock(state.manual)) {
+		addServerRow(wrap, state, server, true);
 	}
+	Settings::Button *const addProxy = Settings::AddButtonWithIcon(
+		wrap,
+		tr::lng_impulse_proxy_add_title(),
+		st::settingsButton,
+		{ &st::menuIconAdd });
+	addProxy->setClickedCallback([=] {
+		addNewProxy();
+	});
+	_addProxyButton = addProxy;
+
+	Ui::AddDivider(wrap);
 	for (const Impulse::ProxyState::Subscription &subscription
 			: state.subscriptions) {
-		addSubscriptionRow(wrap, subscription);
-		for (const Impulse::ProxyState::Server &server
-				: subscription.servers) {
-			addServerRow(wrap, state, server, RowKey::Kind::Member);
-		}
-	}
-	if (rowKeys.empty()) {
-		wrap->add(
-			object_ptr<Ui::FlatLabel>(
-				wrap,
-				tr::lng_impulse_proxy_list_empty(tr::now),
-				st::proxyEmptyListLabel),
-			st::proxyEmptyListPadding);
+		addSubscription(wrap, state, subscription);
 	}
 	wrap->resizeToWidth(width());
 }
@@ -1305,198 +1291,133 @@ void ProxiesBox::addServerRow(
 		not_null<Ui::VerticalLayout*> wrap,
 		const Impulse::ProxyState::State &state,
 		const Impulse::ProxyState::Server &server,
-		RowKey::Kind kind) {
+		bool manual) {
 	const std::optional<std::int64_t> ping = _controller->impulsePing(
 		server.id);
 	const bool selected = state.selectedId.has_value()
 		&& *state.selectedId == server.id;
-	const bool running = Core::App().impulseXrayRunning();
 
 	ProxyRow::View view;
-	view.id = int(rowKeys.size());
-	view.type = u"VLESS"_q;
-	view.host = QString::fromStdString(server.host);
-	view.port = std::uint32_t(std::max(server.port, 0));
+	view.name = ImpulseServerName(server);
 	view.selected = selected;
-	view.supportsShare = (kind == RowKey::Kind::Manual)
-		&& server.shareLink.has_value();
-	view.editable = (kind == RowKey::Kind::Manual);
-	view.deletable = (kind == RowKey::Kind::Manual);
-	view.ping = ping.has_value() ? int(std::max<std::int64_t>(*ping, 0)) : 0;
-	view.state = ProxyRow::State::NotTested;
-	if (_controller->impulseChecking()) {
+	view.ping = int(ping.value_or(-1));
+	if (state.enabled && selected) {
+		view.state = ImpulseConnected(state)
+			? ProxyRow::State::Online
+			: ProxyRow::State::Connecting;
+	} else if (_controller->impulseServerChecking(server.id)) {
 		view.state = ProxyRow::State::Checking;
-	} else if (selected && running) {
-		view.state = ProxyRow::State::Online;
 	} else if (ping.has_value()) {
 		view.state = (*ping >= 0)
 			? ProxyRow::State::Available
 			: ProxyRow::State::Unavailable;
+	} else {
+		view.state = ProxyRow::State::NotTested;
 	}
 
-	const int id = view.id;
-	rowKeys.push_back(RowKey{ kind, server.id });
-	ProxyRow *const row = wrap->add(
-		object_ptr<ProxyRow>(wrap, std::move(view)));
-	setupRowButtons(id, row);
-}
-
-void ProxiesBox::addSubscriptionRow(
-		not_null<Ui::VerticalLayout*> wrap,
-		const Impulse::ProxyState::Subscription &subscription) {
-	ProxyRow::View view;
-	view.id = int(rowKeys.size());
-	view.type = (subscription.meta.title.has_value()
-			&& !subscription.meta.title->empty())
-		? QString::fromStdString(*subscription.meta.title)
-		: tr::lng_impulse_proxy_list_subscription(tr::now);
-	view.host = tr::lng_impulse_proxy_list_servers(
-		tr::now,
-		lt_count,
-		int(subscription.servers.size()));
-	view.port = 0;
-	view.refreshable = true;
-	view.deletable = true;
-	view.state = subscription.lastError.has_value()
-		? ProxyRow::State::Unavailable
-		: ProxyRow::State::NotTested;
-
-	const int id = view.id;
-	rowKeys.push_back(RowKey{ RowKey::Kind::Subscription, subscription.id });
-	ProxyRow *const row = wrap->add(
-		object_ptr<ProxyRow>(wrap, std::move(view)));
-	setupRowButtons(id, row);
-}
-
-void ProxiesBox::setupRowButtons(int id, not_null<ProxyRow*> button) {
-	const RowKey key = rowKeys[std::size_t(id)];
 	const not_null<ProxiesBoxController*> controller = _controller;
-
-	button->deleteClicks(
+	const std::string id = server.id;
+	ProxyRow *const row = wrap->add(
+		object_ptr<ProxyRow>(wrap, std::move(view)));
+	row->clicks(
 	) | rpl::on_next([=] {
-		if (key.kind == RowKey::Kind::Manual) {
-			controller->deleteImpulseServer(key.id);
-		} else if (key.kind == RowKey::Kind::Subscription) {
-			controller->deleteImpulseSubscription(key.id);
-		}
-	}, button->lifetime());
-
-	button->editClicks(
+		controller->selectImpulseServer(id);
+	}, row->lifetime());
+	row->detailsClicks(
 	) | rpl::on_next([=] {
-		if (key.kind != RowKey::Kind::Manual) {
-			return;
-		}
-		const std::optional<Impulse::ProxyState::Server> server
-			= controller->impulseManualServer(key.id);
-		if (server) {
-			uiShow()->showBox(Box<ProxyBox>(
-				base::make_weak(controller.get()),
-				*server));
-		}
-	}, button->lifetime());
-
-	button->refreshClicks(
-	) | rpl::on_next([=] {
-		controller->refreshImpulseSubscription(key.id);
-	}, button->lifetime());
-
-	rpl::merge(
-		button->shareClicks() | rpl::map_to(false),
-		button->showQrClicks() | rpl::map_to(true)
-	) | rpl::on_next([=](bool qr) {
-		controller->shareImpulseServer(key.id, qr);
-	}, button->lifetime());
-
-	button->clicks(
-	) | rpl::on_next([=] {
-		if (key.kind != RowKey::Kind::Subscription) {
-			controller->selectImpulseServer(key.id);
-		}
-	}, button->lifetime());
+		ShowImpulseServerDetails(uiShow(), controller, id, manual);
+	}, row->lifetime());
 }
 
-ProxyBox::ProxyBox(
-	QWidget*,
-	base::weak_ptr<ProxiesBoxController> controller,
-	Impulse::ProxyState::Server initial)
-: weakController(std::move(controller))
-, server(std::move(initial)) {
-}
+void ProxiesBox::addSubscription(
+		not_null<Ui::VerticalLayout*> wrap,
+		const Impulse::ProxyState::State &state,
+		const Impulse::ProxyState::Subscription &subscription) {
+	const not_null<ProxiesBoxController*> controller = _controller;
+	const std::string id = subscription.id;
+	const auto &meta = subscription.meta;
 
-void ProxyBox::prepare() {
-	setTitle(tr::lng_impulse_proxy_edit_title());
+	Ui::AddSubsectionTitle(
+		wrap,
+		rpl::single(ImpulseSubscriptionTitle(subscription)));
+	for (const Impulse::ProxyState::Server &server
+			: _controller->impulseSortedBlock(subscription.servers)) {
+		addServerRow(wrap, state, server, false);
+	}
 
-	const auto inner = setInnerWidget(object_ptr<Ui::VerticalLayout>(this));
-	nameInput = inner->add(
-		object_ptr<Ui::InputField>(
-			inner,
-			st::defaultInputField,
-			tr::lng_impulse_proxy_edit_name(),
-			QString::fromStdString(server.name)),
-		st::boxRowPadding);
-	linkInput = inner->add(
-		object_ptr<Ui::InputField>(
-			inner,
-			st::defaultInputField,
-			tr::lng_impulse_proxy_edit_link(),
-			QString::fromStdString(server.shareLink.value_or(std::string()))),
-		st::boxRowPadding);
-	Ui::AddDividerText(
-		inner,
-		rpl::single(tr::lng_impulse_proxy_edit_address(
-			tr::now,
-			lt_address,
-			QString::fromStdString(server.host)
-				+ ':'
-				+ QString::number(server.port))));
-
-	const auto submit = [=] { save(); };
-	nameInput->submits() | rpl::on_next(submit, nameInput->lifetime());
-	linkInput->submits() | rpl::on_next(submit, linkInput->lifetime());
-
-	addButton(tr::lng_settings_save(), [=] { save(); });
-	addButton(tr::lng_cancel(), [=] { closeBox(); });
-	addLeftButton(tr::lng_impulse_proxy_edit_check(), [=] { check(); });
-	addLeftButton(tr::lng_impulse_proxy_edit_use(), [=] { use(); });
-	addLeftButton(tr::lng_impulse_proxy_list_advanced(), [=] {
-		ShowImpulseProxyAdvancedBox(uiShow());
+	Settings::Button *const refresh = Settings::AddButtonWithIcon(
+		wrap,
+		tr::lng_impulse_proxy_refresh(),
+		st::settingsButton,
+		{ &st::menuIconRestore });
+	refresh->setDisabled(_controller->impulseRefreshing(id));
+	refresh->setClickedCallback([=] {
+		controller->refreshImpulseSubscription(id);
 	});
 
-	inner->resizeToWidth(st::boxWideWidth);
-	setDimensionsToContent(st::boxWideWidth, inner);
-}
+	Settings::Button *const deleteButton = Settings::AddButtonWithIcon(
+		wrap,
+		tr::lng_impulse_proxy_delete(),
+		st::settingsAttentionButton);
+	deleteButton->setClickedCallback([=] {
+		ShowImpulseDeleteSubscription(
+			uiShow(),
+			base::make_weak(controller.get()),
+			id,
+			ImpulseSubscriptionTitle(subscription),
+			ImpulseSubscriptionInUse(state, subscription));
+	});
 
-void ProxyBox::setInnerFocus() {
-	nameInput->setFocusFast();
-}
-
-void ProxyBox::save() {
-	const QString name = nameInput->getLastText().trimmed();
-	const QString link = linkInput->getLastText().trimmed();
-	if (link.isEmpty()) {
-		linkInput->showError();
-		return;
+	// The info lines, one each, as Android subscriptionInfo builds them.
+	const bool hasTotal = meta.total > 0;
+	const bool hasExpire = meta.expire > 0;
+	const auto expires = QDateTime::fromSecsSinceEpoch(meta.expire).date();
+	auto lines = QStringList();
+	if (hasTotal) {
+		const auto used = std::max<std::int64_t>(meta.upload, 0)
+			+ std::max<std::int64_t>(meta.download, 0);
+		const auto usedText = Ui::FormatSizeText(used);
+		const auto totalText = Ui::FormatSizeText(meta.total);
+		lines.push_back(hasExpire
+			? tr::lng_impulse_proxy_traffic(
+				tr::now,
+				lt_used,
+				usedText,
+				lt_total,
+				totalText,
+				lt_date,
+				langDayOfMonthFull(expires))
+			: tr::lng_impulse_proxy_traffic_no_expiry(
+				tr::now,
+				lt_used,
+				usedText,
+				lt_total,
+				totalText));
+	} else if (hasExpire) {
+		lines.push_back(langDayOfMonthFull(expires));
 	}
-	if (ProxiesBoxController *const strong = weakController.get()) {
-		strong->editImpulseServer(
-			server.id,
-			name.toStdString(),
-			link.toStdString());
+	if (subscription.skipped > 0) {
+		lines.push_back(tr::lng_impulse_proxy_skipped(
+			tr::now,
+			lt_count,
+			subscription.skipped));
 	}
-	closeBox();
-}
-
-void ProxyBox::check() {
-	if (ProxiesBoxController *const strong = weakController.get()) {
-		strong->checkImpulseServer(server.id);
+	if (subscription.updatedAt > 0) {
+		lines.push_back(tr::lng_impulse_proxy_updated(
+			tr::now,
+			lt_date,
+			langDateTime(QDateTime::fromMSecsSinceEpoch(
+				subscription.updatedAt))));
 	}
-}
-
-void ProxyBox::use() {
-	if (ProxiesBoxController *const strong = weakController.get()) {
-		strong->applyImpulseServer(server.id);
+	if (!lines.isEmpty()) {
+		Ui::AddDividerText(wrap, rpl::single(lines.join(u"\n"_q)));
 	}
-	closeBox();
+	if (subscription.lastError) {
+		const auto error = Ui::AddDividerText(
+			wrap,
+			rpl::single(ImpulseErrorText(*subscription.lastError)));
+		error->setTextColorOverride(st::boxTextFgError->c);
+	}
 }
 
 using Connection = MTP::details::AbstractConnection;
@@ -1506,30 +1427,7 @@ using Checker = MTP::ProxyCheckConnection;
 
 ProxiesBoxController::ProxiesBoxController(not_null<Main::Account*> account)
 : _account(account)
-, _settings(Core::App().settings().proxy())
-, _saveTimer([] { Local::writeSettings(); }) {
-	_list = ranges::views::all(
-		_settings.list()
-	) | ranges::views::transform([&](const ProxyData &proxy) {
-		return Item{ ++_idCounter, proxy };
-	}) | ranges::to_vector;
-
-	_settings.connectionTypeChanges(
-	) | rpl::on_next([=] {
-		_proxySettingsChanges.fire_copy(_settings.settings());
-		const auto i = findByProxy(_settings.selected());
-		if (i != end(_list)) {
-			updateView(*i);
-		}
-	}, _lifetime);
-
-	MTP::WebProxy::Transport::StateChanges(
-	) | rpl::on_next([=](const MTP::WebProxy::Transport::StateChange &change) {
-		const auto i = findByProxy(change.proxy);
-		if (i != end(_list)) {
-			updateView(*i);
-		}
-	}, _lifetime);
+, _settings(Core::App().settings().proxy()) {
 }
 
 ProxyData ProxiesBoxController::ProxyFromLink(const QString &link) {
@@ -1815,65 +1713,6 @@ void ProxiesBoxController::ShowApplyConfirmation(
 	}
 }
 
-auto ProxiesBoxController::proxySettingsValue() const
--> rpl::producer<ProxyData::Settings> {
-	return _proxySettingsChanges.events_starting_with_copy(
-		_settings.settings()
-	) | rpl::distinct_until_changed();
-}
-
-void ProxiesBoxController::refreshChecker(Item &item) {
-	if (item.data.type == Type::Web) {
-		MTP::ResetProxyCheckers(item.checker, item.checkerv6);
-		item.state = ItemState::NotTested;
-		item.ping = 0;
-		updateView(item);
-		return;
-	}
-	item.state = ItemState::Checking;
-	const auto id = item.id;
-	MTP::StartProxyCheck(
-		&_account->mtp(),
-		item.data,
-		Core::App().settings().proxy().tryIPv6(),
-		item.checker,
-		item.checkerv6,
-		[=](Connection *raw, int pingTime) {
-			const auto item = ranges::find(
-				_list,
-				id,
-				[](const Item &item) { return item.id; });
-			if (item == end(_list)) {
-				return;
-			}
-			MTP::DropProxyChecker(item->checker, item->checkerv6, raw);
-			MTP::ResetProxyCheckers(item->checker, item->checkerv6);
-			if (item->state == ItemState::Checking) {
-				item->state = ItemState::Available;
-				item->ping = pingTime;
-				updateView(*item);
-			}
-		},
-		[=](Connection *raw) {
-			const auto item = ranges::find(
-				_list,
-				id,
-				[](const Item &item) { return item.id; });
-			if (item == end(_list)) {
-				return;
-			}
-			MTP::DropProxyChecker(item->checker, item->checkerv6, raw);
-			if (!MTP::HasProxyCheckers(item->checker, item->checkerv6)
-				&& item->state == ItemState::Checking) {
-				item->state = ItemState::Unavailable;
-				updateView(*item);
-			}
-		});
-	if (!MTP::HasProxyCheckers(item.checker, item.checkerv6)) {
-		item.state = ItemState::Unavailable;
-	}
-}
-
 object_ptr<Ui::BoxContent> ProxiesBoxController::CreateOwningBox(
 		not_null<Main::Account*> account,
 		const QString &highlightId) {
@@ -1890,286 +1729,7 @@ object_ptr<Ui::BoxContent> ProxiesBoxController::create(
 	return result;
 }
 
-auto ProxiesBoxController::findById(int id) -> std::vector<Item>::iterator {
-	const auto result = ranges::find(
-		_list,
-		id,
-		[](const Item &item) { return item.id; });
-	Assert(result != end(_list));
-	return result;
-}
 
-auto ProxiesBoxController::findByProxy(const ProxyData &proxy)
-->std::vector<Item>::iterator {
-	return ranges::find(
-		_list,
-		proxy,
-		[](const Item &item) { return item.data; });
-}
-
-void ProxiesBoxController::deleteItem(int id) {
-	setDeleted(id, true);
-}
-
-void ProxiesBoxController::deleteItems() {
-	for (const auto &item : _list) {
-		setDeleted(item.id, true);
-	}
-}
-
-void ProxiesBoxController::restoreItem(int id) {
-	setDeleted(id, false);
-}
-
-void ProxiesBoxController::shareItem(int id, bool qr) {
-	share(findById(id)->data, qr);
-}
-
-void ProxiesBoxController::shareItems() {
-	auto result = QString();
-	for (const auto &item : _list) {
-		if (!item.deleted && ProxyDataIsShareable(item.data)) {
-			const auto link = ProxyDataToPublicLink(_account, item.data);
-			if (!link.isEmpty()) {
-				result += (result.isEmpty() ? QString() : u"\n\n"_q) + link;
-			}
-		}
-	}
-	if (result.isEmpty()) {
-		return;
-	}
-	QGuiApplication::clipboard()->setText(result);
-	_show->showToast({
-		.text = { tr::lng_proxy_edit_share_list_toast(tr::now) },
-		.iconLottie = u"toast/copy"_q,
-		.iconLottieSize = st::toastLottieIconSize,
-	});
-}
-
-void ProxiesBoxController::openBrowser(int id) {
-	const auto item = findById(id);
-	if (_settings.isEnabled()
-		&& _settings.selected() == item->data
-		&& item->data.type == Type::Web) {
-		MTP::WebProxy::Transport::OpenBrowser(item->data);
-	}
-}
-
-void ProxiesBoxController::setDeleted(int id, bool deleted) {
-	auto item = findById(id);
-	if (item->deleted == deleted) {
-		return;
-	}
-	item->deleted = deleted;
-
-	if (deleted) {
-		const auto removed = _settings.removeFromList(item->data);
-		Assert(removed);
-
-		if (item->data == _settings.selected()) {
-			_lastSelectedProxy = _settings.selected();
-			_settings.setSelected(MTP::ProxyData());
-			if (_settings.isEnabled()) {
-				_lastSelectedProxyUsed = true;
-				Core::App().setCurrentProxy(
-					ProxyData(),
-					ProxyData::Settings::System);
-				saveDelayed();
-			} else {
-				_lastSelectedProxyUsed = false;
-			}
-		}
-	} else {
-		if (_settings.indexInList(item->data) < 0) {
-			const auto &proxies = _settings.list();
-			auto insertBefore = item + 1;
-			while (insertBefore != end(_list) && insertBefore->deleted) {
-				++insertBefore;
-			}
-			const auto foundIndex = (insertBefore == end(_list))
-				? int(proxies.size())
-				: _settings.indexInList(insertBefore->data);
-			const auto insertIndex = (foundIndex >= 0)
-				? foundIndex
-				: int(proxies.size());
-			_settings.insertToList(insertIndex, item->data);
-		}
-
-		if (!_settings.selected() && _lastSelectedProxy == item->data) {
-			Assert(!_settings.isEnabled());
-
-			if (base::take(_lastSelectedProxyUsed)) {
-				Core::App().setCurrentProxy(
-					base::take(_lastSelectedProxy),
-					ProxyData::Settings::Enabled);
-			} else {
-				_settings.setSelected(base::take(_lastSelectedProxy));
-			}
-		}
-	}
-	saveDelayed();
-	updateView(*item);
-}
-
-bool ProxiesBoxController::contains(const ProxyData &proxy) const {
-	const auto j = ranges::find(
-		_list,
-		proxy,
-		[](const Item &item) { return item.data; });
-	return (j != end(_list));
-}
-
-bool ProxiesBoxController::setProxySettings(ProxyData::Settings value) {
-	if (_settings.settings() == value) {
-		return true;
-	} else if (value == ProxyData::Settings::Enabled) {
-		if (_settings.list().empty()) {
-			return false;
-		} else if (!_settings.selected()) {
-			_settings.setSelected(_settings.list().back());
-			auto j = findByProxy(_settings.selected());
-			if (j != end(_list)) {
-				updateView(*j);
-			}
-		}
-	}
-	Core::App().setCurrentProxy(_settings.selected(), value);
-	saveDelayed();
-	return true;
-}
-
-bool ProxiesBoxController::setProxyForCalls(bool enabled) {
-	if (_settings.useProxyForCalls() == enabled) {
-		return true;
-	}
-	Impulse::ProxyState::State state = _settings.impulseProxyState();
-	if (enabled && !ProxiedCallsAvailable()) {
-		return false;
-	} else if (!enabled && !state.useForTransport) {
-		// At least one of the two transports stays on.
-		return false;
-	}
-	_settings.setUseProxyForCalls(enabled);
-	state.useForCalls = enabled;
-	_settings.setImpulseProxyState(std::move(state));
-	if (_settings.isEnabled() && _settings.selected().supportsCalls()) {
-		_settings.connectionTypeChangesNotify();
-	}
-	saveDelayed();
-	return true;
-}
-
-void ProxiesBoxController::setProxyRotationEnabled(bool enabled) {
-	if (_settings.proxyRotationEnabled() == enabled) {
-		return;
-	}
-	_settings.setProxyRotationEnabled(enabled);
-	saveDelayed();
-}
-
-void ProxiesBoxController::setProxyRotationTimeout(int value) {
-	if (_settings.proxyRotationTimeout() == value) {
-		return;
-	}
-	_settings.setProxyRotationTimeout(value);
-	saveDelayed();
-}
-
-void ProxiesBoxController::setTryIPv6(bool enabled) {
-	if (Core::App().settings().proxy().tryIPv6() == enabled) {
-		return;
-	}
-	Core::App().settings().proxy().setTryIPv6(enabled);
-	_account->mtp().restart();
-	_settings.connectionTypeChangesNotify();
-	saveDelayed();
-}
-
-void ProxiesBoxController::saveDelayed() {
-	Core::App().proxyRotationSettingsChanged();
-	_saveTimer.callOnce(kSaveSettingsDelayedTimeout);
-}
-
-auto ProxiesBoxController::views() const -> rpl::producer<ItemView> {
-	return _views.events();
-}
-
-rpl::producer<bool> ProxiesBoxController::listShareableChanges() const {
-	return _views.events_starting_with(ItemView()) | rpl::map([=] {
-		for (const auto &item : _list) {
-			if (!item.deleted && ProxyDataIsShareable(item.data)) {
-				return true;
-			}
-		}
-		return false;
-	});
-}
-
-void ProxiesBoxController::updateView(const Item &item) {
-	const auto selected = (_settings.selected() == item.data);
-	const auto deleted = item.deleted;
-	const auto type = [&] {
-		switch (item.data.type) {
-		case Type::Http: return u"HTTP"_q;
-		case Type::Socks5: return u"SOCKS5"_q;
-		case Type::Mtproto: return u"MTPROTO"_q;
-		case Type::Web: return u"WEB"_q;
-		}
-		Unexpected("Proxy type in ProxiesBoxController::updateView.");
-	}();
-	const auto state = [&] {
-		if (!selected || !_settings.isEnabled()) {
-			return item.state;
-		} else if (item.data.type == Type::Web) {
-			switch (MTP::WebProxy::Transport::CurrentState(item.data)) {
-			case MTP::WebProxy::Transport::State::WaitingForBrowser:
-				return ItemState::WaitingForBrowser;
-			case MTP::WebProxy::Transport::State::Failed:
-				return ItemState::Unavailable;
-			case MTP::WebProxy::Transport::State::Connected:
-				return ItemState::Online;
-			case MTP::WebProxy::Transport::State::Idle:
-				return ItemState::NotTested;
-			case MTP::WebProxy::Transport::State::Connecting:
-				return ItemState::Connecting;
-			}
-			Unexpected("Web proxy transport state.");
-		} else if (_account->mtp().dcstate() == MTP::ConnectedState) {
-			return ItemState::Online;
-		}
-		return ItemState::Connecting;
-	}();
-	const auto supportsShare = ProxyDataIsShareable(item.data);
-	const auto supportsCalls = item.data.supportsCalls();
-	_views.fire({
-		.id = item.id,
-		.type = type,
-		.host = ((item.data.type == Type::Web)
-			? item.data.webAddress()
-			: item.data.host),
-		.port = item.data.port,
-		.ping = item.ping,
-		.selected = !deleted && selected,
-		.deleted = deleted,
-		.supportsShare = !deleted && supportsShare,
-		.supportsCalls = supportsCalls,
-		.web = item.data.type == Type::Web,
-		.canOpenBrowser = !deleted
-			&& selected
-			&& _settings.isEnabled()
-			&& item.data.type == Type::Web
-			&& (state == ItemState::WaitingForBrowser
-				|| state == ItemState::Unavailable),
-		.refreshable = false,
-		.deletable = true,
-		.editable = true,
-		.state = state,
-	});
-}
-
-void ProxiesBoxController::share(const ProxyData &proxy, bool qr) {
-	ShareProxy(_show, _account, proxy, qr);
-}
 
 void ProxiesBoxController::setImpulseEnabled(bool enabled) {
 	Impulse::ProxyState::State state = _settings.impulseProxyState();
@@ -2183,34 +1743,10 @@ void ProxiesBoxController::setImpulseEnabled(bool enabled) {
 	saveImpulse(std::move(state));
 }
 
-bool ProxiesBoxController::setImpulseUseForTransport(bool enabled) {
-	Impulse::ProxyState::State state = _settings.impulseProxyState();
-	if (state.useForTransport == enabled) {
-		return true;
-	} else if (!enabled && !state.useForCalls) {
-		// At least one of the two transports stays on.
-		return false;
-	}
-	state.useForTransport = enabled;
-	saveImpulse(std::move(state));
-	return true;
-}
-
-bool ProxiesBoxController::setImpulseUseForCalls(bool enabled) {
-	Impulse::ProxyState::State state = _settings.impulseProxyState();
-	if (state.useForCalls == enabled) {
-		return true;
-	} else if (enabled && !ProxiedCallsAvailable()) {
-		return false;
-	} else if (!enabled && !state.useForTransport) {
-		return false;
-	}
-	state.useForCalls = enabled;
-	saveImpulse(std::move(state));
-	return true;
-}
-
-void ProxiesBoxController::importText(const QString &text) {
+void ProxiesBoxController::importImpulseText(
+		const QString &text,
+		ImpulseImportAlive alive,
+		ImpulseImportDone done) {
 	const QString normalized = QString(text).trimmed().replace(
 		QRegularExpression(u"\\s+"_q),
 		u"\n"_q);
@@ -2222,18 +1758,21 @@ void ProxiesBoxController::importText(const QString &text) {
 		Core::App().impulseProxy().importLinks(
 			utf8,
 			[=](std::vector<Impulse::ProxyState::Server> servers) {
-				if (ProxiesBoxController *const that = weak.get()) {
-					that->addImpulseServers(std::move(servers));
+				ProxiesBoxController *const that = weak.get();
+				if (!that || !alive()) {
+					return;
 				}
+				done(that->addImpulseServers(std::move(servers)));
 			});
 	} else if (kind == Impulse::ProxyInput::InputKind::Subscription) {
 		const std::string url(Impulse::ProxyInput::Trim(utf8));
 		fetchImpulseSubscription(
 			url,
-			Impulse::ProxyInput::SubscriptionId(url));
+			Impulse::ProxyInput::SubscriptionId(url),
+			std::move(alive),
+			std::move(done));
 	} else {
-		showImpulseToast(
-			tr::lng_proxy_add_from_clipboard_failed_toast(tr::now));
+		done(tr::lng_impulse_proxy_invalid(tr::now));
 	}
 }
 
@@ -2248,7 +1787,15 @@ void ProxiesBoxController::refreshImpulseSubscription(const std::string &id) {
 	if (found == state.subscriptions.end()) {
 		return;
 	}
-	fetchImpulseSubscription(found->url, id);
+	fetchImpulseSubscription(
+		found->url,
+		id,
+		[] { return true; },
+		[=](QString message) {
+			if (!message.isEmpty()) {
+				showImpulseToast(message);
+			}
+		});
 }
 
 void ProxiesBoxController::deleteImpulseServer(const std::string &id) {
@@ -2298,25 +1845,11 @@ void ProxiesBoxController::selectImpulseServer(const std::string &id) {
 	Impulse::ProxyState::State state = _settings.impulseProxyState();
 	if (state.selectedId && *state.selectedId == id) {
 		return;
-	} else if (!ImpulseHasServer(state, id)) {
+	} else if (!Impulse::ProxyState::HasServer(state, id)) {
 		return;
 	}
 	state.selectedId = id;
 	saveImpulse(std::move(state));
-}
-
-void ProxiesBoxController::shareImpulseServer(const std::string &id, bool qr) {
-	const Impulse::ProxyState::State &state = _settings.impulseProxyState();
-	const auto found = std::find_if(
-		state.manual.begin(),
-		state.manual.end(),
-		[&](const Impulse::ProxyState::Server &server) {
-			return server.id == id;
-		});
-	if (found == state.manual.end() || !found->shareLink) {
-		return;
-	}
-	ShareImpulseLink(_show, QString::fromStdString(*found->shareLink), qr);
 }
 
 void ProxiesBoxController::shareImpulseList() {
@@ -2331,164 +1864,77 @@ void ProxiesBoxController::shareImpulseList() {
 		}
 		text += QString::fromStdString(*server.shareLink);
 	}
-	ShareImpulseLink(_show, text, false);
+	ShareImpulseLink(_show, text);
 }
 
 void ProxiesBoxController::checkImpulseServers() {
-	const Impulse::ProxyState::State state = _settings.impulseProxyState();
-	const std::vector<Impulse::ProxyState::Server> servers
-		= ImpulseAllServers(state);
-	if (servers.empty()) {
-		return;
-	}
-	runImpulseCheck(state, servers);
+	requestImpulseCheck(true);
 }
 
-void ProxiesBoxController::checkImpulseServer(const std::string &id) {
-	const Impulse::ProxyState::State state = _settings.impulseProxyState();
-	const std::vector<Impulse::ProxyState::Server> all
-		= ImpulseAllServers(state);
-	const auto found = std::find_if(
-		all.begin(),
-		all.end(),
-		[&](const Impulse::ProxyState::Server &server) {
-			return server.id == id;
-		});
-	if (found == all.end()) {
-		return;
+// Android runs a round when the box opens, if the last one is older than a
+// minute, and then once a minute while the box is open.
+void ProxiesBoxController::startImpulseAutoChecks() {
+	const std::int64_t last = Core::App().impulseProxy().lastCheckTime();
+	if (QDateTime::currentMSecsSinceEpoch() - last > kImpulseAutoCheckMs) {
+		requestImpulseCheck(false);
 	}
-	runImpulseCheck(state, { *found });
+	_autoCheckTimer.setCallback([=] {
+		requestImpulseCheck(false);
+	});
+	_autoCheckTimer.callEach(kImpulseAutoCheckMs);
 }
 
-void ProxiesBoxController::runImpulseCheck(
-		const Impulse::ProxyState::State &state,
-		std::vector<Impulse::ProxyState::Server> servers) {
-	if (impulseCheckRunning) {
-		return;
+void ProxiesBoxController::requestImpulseCheck(bool manual) {
+	// The service keeps the round and the request that comes during it, so a
+	// closed box does not lose them.
+	if (Core::App().impulseProxy().requestCheck(manual)) {
+		impulseChangeStream.fire({});
 	}
-	impulseCheckRunning = true;
-	impulseChangeStream.fire({});
-	const base::weak_ptr<ProxiesBoxController> weak = base::make_weak(this);
-	Core::App().impulseProxy().checkServers(
-		state,
-		servers,
-		[=](std::vector<Impulse::Xray::PingResult> results) {
-			if (ProxiesBoxController *const that = weak.get()) {
-				that->finishImpulseCheck(servers, results);
-			}
-		});
 }
 
-auto ProxiesBoxController::impulseManualServer(const std::string &id) const
+const Impulse::ProxyState::State &ProxiesBoxController::impulseState() const {
+	return _settings.impulseProxyState();
+}
+
+auto ProxiesBoxController::impulseServer(const std::string &id) const
 -> std::optional<Impulse::ProxyState::Server> {
-	const Impulse::ProxyState::State &state = _settings.impulseProxyState();
-	const auto found = std::find_if(
-		state.manual.begin(),
-		state.manual.end(),
-		[&](const Impulse::ProxyState::Server &server) {
-			return server.id == id;
-		});
-	if (found == state.manual.end()) {
-		return std::nullopt;
-	}
-	return *found;
-}
-
-void ProxiesBoxController::editImpulseServer(
-		const std::string &id,
-		const std::string &name,
-		const std::string &shareLink) {
-	Impulse::ProxyState::State state = _settings.impulseProxyState();
-	const auto found = std::find_if(
-		state.manual.begin(),
-		state.manual.end(),
-		[&](const Impulse::ProxyState::Server &server) {
-			return server.id == id;
-		});
-	if (found == state.manual.end()) {
-		return;
-	}
-	if (found->shareLink && *found->shareLink == shareLink) {
-		// Only the name can have changed, so the server keeps its outbound.
-		const std::string next = name.empty() ? found->host : name;
-		if (found->name == next) {
-			return;
+	for (const Impulse::ProxyState::Server &server
+			: Impulse::ProxyState::AllServers(_settings.impulseProxyState())) {
+		if (server.id == id) {
+			return server;
 		}
-		found->name = next;
-		saveImpulse(std::move(state));
-		return;
 	}
-	const base::weak_ptr<ProxiesBoxController> weak = base::make_weak(this);
-	Core::App().impulseProxy().importLinks(
-		shareLink,
-		[=](std::vector<Impulse::ProxyState::Server> servers) {
-			if (ProxiesBoxController *const that = weak.get()) {
-				that->replaceImpulseServer(id, name, std::move(servers));
-			}
+	return std::nullopt;
+}
+
+bool ProxiesBoxController::impulseServerChecking(const std::string &id) const {
+	return Core::App().impulseProxy().checkingServer(id);
+}
+
+bool ProxiesBoxController::impulseRefreshing(const std::string &id) const {
+	return std::find(
+		_refreshing.begin(),
+		_refreshing.end(),
+		id) != _refreshing.end();
+}
+
+std::vector<Impulse::ProxyState::Server> ProxiesBoxController::impulseSortedBlock(
+		std::vector<Impulse::ProxyState::Server> block) const {
+	const Impulse::ImpulseProxyService &service = Core::App().impulseProxy();
+	std::stable_sort(
+		block.begin(),
+		block.end(),
+		[&](
+				const Impulse::ProxyState::Server &a,
+				const Impulse::ProxyState::Server &b) {
+			return service.sortKey(a.id) < service.sortKey(b.id);
 		});
-}
-
-void ProxiesBoxController::replaceImpulseServer(
-		const std::string &id,
-		const std::string &name,
-		std::vector<Impulse::ProxyState::Server> servers) {
-	if (servers.size() != 1) {
-		showImpulseToast(
-			tr::lng_proxy_add_from_clipboard_failed_toast(tr::now));
-		return;
-	}
-	Impulse::ProxyState::State state = _settings.impulseProxyState();
-	const auto found = std::find_if(
-		state.manual.begin(),
-		state.manual.end(),
-		[&](const Impulse::ProxyState::Server &server) {
-			return server.id == id;
-		});
-	if (found == state.manual.end()) {
-		return;
-	}
-	Impulse::ProxyState::Server next = std::move(servers.front());
-	if (next.id != id && ImpulseHasServer(state, next.id)) {
-		showImpulseToast(
-			tr::lng_proxy_add_from_clipboard_existing_toast(tr::now));
-		return;
-	}
-	if (!name.empty()) {
-		next.name = name;
-	}
-	const bool selected = state.selectedId && *state.selectedId == id;
-	*found = std::move(next);
-	if (selected) {
-		state.selectedId = found->id;
-	}
-	impulsePingResults.erase(id);
-	saveImpulse(std::move(state));
-}
-
-void ProxiesBoxController::applyImpulseServer(const std::string &id) {
-	Impulse::ProxyState::State state = _settings.impulseProxyState();
-	if (!ImpulseHasServer(state, id)) {
-		return;
-	}
-	if (state.enabled && state.selectedId && *state.selectedId == id) {
-		return;
-	}
-	state.enabled = true;
-	state.selectedId = id;
-	saveImpulse(std::move(state));
-}
-
-bool ProxiesBoxController::impulseChecking() const {
-	return impulseCheckRunning;
+	return block;
 }
 
 std::optional<std::int64_t> ProxiesBoxController::impulsePing(
 		const std::string &id) const {
-	const auto found = impulsePingResults.find(id);
-	if (found == impulsePingResults.end()) {
-		return std::nullopt;
-	}
-	return found->second;
+	return Core::App().impulseProxy().pingResult(id);
 }
 
 rpl::producer<> ProxiesBoxController::impulseChanges() const {
@@ -2499,20 +1945,20 @@ void ProxiesBoxController::saveImpulse(Impulse::ProxyState::State state) {
 	_settings.setImpulseProxyState(std::move(state));
 	Core::App().saveSettingsDelayed();
 	Core::App().refreshGlobalProxy();
+	// The Connection type row reads the VLESS state, so it refreshes too.
+	_settings.connectionTypeChangesNotify();
 	impulseChangeStream.fire({});
 }
 
-void ProxiesBoxController::addImpulseServers(
+QString ProxiesBoxController::addImpulseServers(
 		std::vector<Impulse::ProxyState::Server> servers) {
 	if (servers.empty()) {
-		showImpulseToast(
-			tr::lng_proxy_add_from_clipboard_failed_toast(tr::now));
-		return;
+		return tr::lng_impulse_proxy_invalid(tr::now);
 	}
 	Impulse::ProxyState::State state = _settings.impulseProxyState();
 	int added = 0;
 	for (Impulse::ProxyState::Server &server : servers) {
-		if (ImpulseHasServer(state, server.id)) {
+		if (Impulse::ProxyState::HasServer(state, server.id)) {
 			continue;
 		}
 		state.manual.push_back(std::move(server));
@@ -2521,24 +1967,37 @@ void ProxiesBoxController::addImpulseServers(
 	if (added == 0) {
 		showImpulseToast(
 			tr::lng_proxy_add_from_clipboard_existing_toast(tr::now));
-		return;
+		return QString();
 	}
 	saveImpulse(std::move(state));
 	showImpulseToast(tr::lng_impulse_proxy_list_added(
 		tr::now,
 		lt_count,
 		added));
+	requestImpulseCheck(false);
+	return QString();
 }
 
 void ProxiesBoxController::fetchImpulseSubscription(
 		const std::string &url,
-		const std::string &id) {
+		const std::string &id,
+		ImpulseImportAlive alive,
+		ImpulseImportDone done) {
+	if (!impulseRefreshing(id)) {
+		_refreshing.push_back(id);
+	}
+	impulseChangeStream.fire({});
 	const base::weak_ptr<ProxiesBoxController> weak = base::make_weak(this);
 	Core::App().impulseProxy().refreshSubscription(
 		url,
 		[=](Impulse::SubscriptionRefresh result) {
 			if (ProxiesBoxController *const that = weak.get()) {
-				that->applyImpulseSubscription(url, id, std::move(result));
+				that->applyImpulseSubscription(
+					url,
+					id,
+					alive,
+					done,
+					std::move(result));
 			}
 		});
 }
@@ -2546,7 +2005,15 @@ void ProxiesBoxController::fetchImpulseSubscription(
 void ProxiesBoxController::applyImpulseSubscription(
 		const std::string &url,
 		const std::string &id,
+		ImpulseImportAlive alive,
+		ImpulseImportDone done,
 		Impulse::SubscriptionRefresh result) {
+	std::erase(_refreshing, id);
+	if (!alive()) {
+		// The Add box was closed or cancelled: the result is dropped.
+		impulseChangeStream.fire({});
+		return;
+	}
 	Impulse::ProxyState::State state = _settings.impulseProxyState();
 	const std::int64_t now = QDateTime::currentMSecsSinceEpoch();
 	const auto found = std::find_if(
@@ -2562,8 +2029,11 @@ void ProxiesBoxController::applyImpulseSubscription(
 			found->lastError = result.error;
 			found->updatedAt = now;
 			saveImpulse(std::move(state));
+		} else {
+			impulseChangeStream.fire({});
 		}
-		showImpulseToast(ImpulseFetchError(result.error));
+		requestImpulseCheck(false);
+		done(ImpulseErrorText(result.error));
 		return;
 	}
 	const int count = int(result.servers.size());
@@ -2589,16 +2059,8 @@ void ProxiesBoxController::applyImpulseSubscription(
 		tr::now,
 		lt_count,
 		count));
-}
-
-void ProxiesBoxController::finishImpulseCheck(
-		const std::vector<Impulse::ProxyState::Server> &servers,
-		const std::vector<Impulse::Xray::PingResult> &results) {
-	for (std::size_t i = 0; i < servers.size() && i < results.size(); ++i) {
-		impulsePingResults[servers[i].id] = results[i].delay;
-	}
-	impulseCheckRunning = false;
-	impulseChangeStream.fire({});
+	requestImpulseCheck(false);
+	done(QString());
 }
 
 void ProxiesBoxController::showImpulseToast(const QString &text) {
@@ -2610,13 +2072,4 @@ void ProxiesBoxController::Show(
 		const QString &highlightId) {
 	controller->show(
 		CreateOwningBox(&controller->session().account(), highlightId));
-}
-
-ProxiesBoxController::~ProxiesBoxController() {
-	if (_saveTimer.isActive()) {
-		base::call_delayed(
-			kSaveSettingsDelayedTimeout,
-			QCoreApplication::instance(),
-			[] { Local::writeSettings(); });
-	}
 }

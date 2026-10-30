@@ -459,6 +459,9 @@ bool ApplyWebProxy(
 		Window::SessionController *controller,
 		const Match &match,
 		const QVariant &context) {
+	if (!ImpulseFeatures::PROXY) {
+		return true;
+	}
 	auto params = url_parse_params(
 		match->captured(1),
 		qthelp::UrlParamNameTransform::ToLower);

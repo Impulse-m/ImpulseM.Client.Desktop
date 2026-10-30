@@ -1307,7 +1307,7 @@ void RegisterSettingsHandlers(Router &router) {
 			if (!ctx.controller) {
 				return Result::NeedsAuth;
 			}
-			ProxiesBoxController::Show(ctx.controller, u"proxy/share-list"_q);
+			ProxiesBoxController::Show(ctx.controller);
 			return Result::Handled;
 		}},
 	});

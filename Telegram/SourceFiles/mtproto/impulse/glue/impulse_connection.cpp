@@ -914,11 +914,31 @@ void ImpulseConnection::callSocket(
 	}
 }
 
-void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
+bool ImpulseConnection::tokenAnswerStale(
+		std::uint64_t requestId,
+		std::uint64_t generation) const {
+	if (generation == transportGeneration) {
+		return false;
+	}
+	DEBUG_LOG(("Impulse Info: connection %1 ignored the token answer %2 of an earlier transport %3."
+		).arg(QString::number(serial)
+		).arg(QString::number(requestId)
+		).arg(QString::number(generation)));
+	return true;
+}
+
+void ImpulseConnection::answerConnectionToken(
+		std::uint64_t requestId,
+		std::uint64_t generation) {
 	// The declaration follows the credential the socket now presents. It is
 	// triggered after the token is answered, so the socket connects with it.
 	if (tokens->hasSession()) {
-		tokens->connectionToken([this, requestId](ConnectionTokenResult result) {
+		tokens->connectionToken([this, requestId, generation](ConnectionTokenResult result) {
+			// The session token was asked for by a socket that a rebuild has since
+			// replaced: its answer must not reach the sockets of the new transport.
+			if (tokenAnswerStale(requestId, generation)) {
+				return;
+			}
 			if (result.status == RefreshStatus::Fresh && !result.token.empty()) {
 				resolveUpdateToken(
 					requestId,
@@ -940,10 +960,17 @@ void ImpulseConnection::answerConnectionToken(std::uint64_t requestId) {
 		declarer->credentialChanged();
 		return;
 	}
-	identity->obtain([this, requestId](IdentityObtainResult result) {
+	identity->obtain([this, requestId, generation](IdentityObtainResult result) {
 		if (!result.token.empty()) {
-			// The identity lane of the minted identity is subscribed from now.
+			// The identity lane of the minted identity is subscribed from now,
+			// also when the socket that asked was replaced by a rebuild.
 			refreshIdentityLane();
+		}
+		// The identity was minted for a socket that a rebuild has since replaced.
+		if (tokenAnswerStale(requestId, generation)) {
+			return;
+		}
+		if (!result.token.empty()) {
 			resolveUpdateToken(requestId, CentrifugoTokenOutcome::Token, result.token);
 			declarer->credentialChanged();
 			return;
@@ -1070,8 +1097,14 @@ void ImpulseConnection::buildTransport(const TransportRoute &route) {
 		// The update socket connects with the session access token, or with the
 		// identity token while there is no session. The media pool presents the
 		// same token (tokenFrom), so the update socket is the only one that asks.
+		// The request ids of a client restart from 1, so an answer is resolved only
+		// on the client that asked: the generation of this client is captured.
+		const std::uint64_t generation = transportGeneration;
 		static_cast<void>(updateClient->setTokenCallback(
-			[this](const CentrifugoTokenRequest &request) {
+			[this, generation](const CentrifugoTokenRequest &request) {
+				if (tokenAnswerStale(request.requestId, generation)) {
+					return;
+				}
 				if (request.kind != CentrifugoTokenKind::Connection) {
 					// Channel tokens are not used: subscriptions carry none.
 					resolveUpdateToken(
@@ -1080,7 +1113,7 @@ void ImpulseConnection::buildTransport(const TransportRoute &route) {
 						std::string());
 					return;
 				}
-				answerConnectionToken(request.requestId);
+				answerConnectionToken(request.requestId, generation);
 			}));
 
 		// The media pool is built on the update client, which owns the socket it
@@ -1112,6 +1145,10 @@ void ImpulseConnection::buildTransport(const TransportRoute &route) {
 }
 
 void ImpulseConnection::dropTransport() {
+	// Every token request of the clients dropped here is stale from now on. The
+	// answers are ignored, so they never resolve on the clients of the next build.
+	++transportGeneration;
+
 	// The carrier settles its open calls with network failures while it closes.
 	// A call sent from one of those callbacks finds no carrier and fails the
 	// same way, so the carrier is taken out before it is closed.

@@ -185,7 +185,12 @@ private:
 		std::vector<std::uint8_t> payload,
 		std::int64_t timeoutMs,
 		SocketCallDone done);
-	void answerConnectionToken(std::uint64_t requestId);
+	void answerConnectionToken(
+		std::uint64_t requestId,
+		std::uint64_t generation);
+	[[nodiscard]] bool tokenAnswerStale(
+		std::uint64_t requestId,
+		std::uint64_t generation) const;
 	void refreshIdentityLane();
 	void adoptLogin(const SessionTokens &pair);
 	[[nodiscard]] std::string currentCredential();
@@ -239,6 +244,11 @@ private:
 	// Set from a sign-in until the transport is rebuilt for the session. The
 	// sockets are keyed to the identity until then, so no login call is sent.
 	bool rekeying = false;
+
+	// Raised by every drop of the update and pool sockets. A token request is
+	// answered only while the generation of its client is still current, since
+	// the request ids of a client restart from 1 on each new client.
+	std::uint64_t transportGeneration = 0;
 };
 
 } // namespace Impulse

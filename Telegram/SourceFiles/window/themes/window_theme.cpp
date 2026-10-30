@@ -444,7 +444,27 @@ bool InitializeFromCache(
 		: std::nullopt;
 }
 
+// ImpulseM: an embedded theme saved before an update keeps the content
+// copied when it was chosen. Take the resource of this build instead.
+void RefreshEmbeddedContent(Saved &saved) {
+	const auto &path = saved.object.pathAbsolute;
+	if (saved.object.cloud.id
+		|| path.isEmpty()
+		|| !IsEmbeddedTheme(path)) {
+		return;
+	}
+	const auto content = readThemeContent(path);
+	if (content.isEmpty()
+		|| content == saved.object.content
+		|| ReadEditingPalette().has_value()) {
+		return;
+	}
+	saved.object.content = content;
+	saved.cache = Cached();
+}
+
 bool InitializeFromSaved(Saved &&saved) {
+	RefreshEmbeddedContent(saved);
 	if (saved.object.content.size() < 4) {
 		LOG(("Theme Error: Could not load theme from '%1' (%2)").arg(
 			saved.object.pathRelative,
@@ -1259,6 +1279,7 @@ void ChatBackground::reapplyWithNightMode(
 	const auto oldNightMode = _nightMode;
 	_nightMode = newNightMode;
 	auto read = settingExactTheme ? Saved() : Local::readThemeAfterSwitch();
+	RefreshEmbeddedContent(read);
 	auto path = read.object.pathAbsolute;
 
 	_nightMode = oldNightMode;

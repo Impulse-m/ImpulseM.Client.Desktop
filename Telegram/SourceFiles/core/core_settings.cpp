@@ -161,6 +161,8 @@ Settings::Settings()
 , _dialogsWithChatWidthRatio(DefaultDialogsWidthRatio())
 , _dialogsNoChatWidthRatio(DefaultDialogsWidthRatio())
 , _videoQuality({ .height = kInitialVideoQuality }) {
+	// ImpulseM: a fresh profile carries the brand default marker into its first save.
+	writePrefGeneric("impulse_tray_brand_default", "\x1"_q);
 }
 
 Settings::~Settings() = default;
@@ -1032,6 +1034,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> systemTextReplace;
 	}
+	// ImpulseM: true only when the stream itself carried the brand default marker.
+	bool trayBrandDefaultStored = false;
 	if (!stream.atEnd()) {
 		auto prefsCount = quint32();
 		stream >> prefsCount;
@@ -1046,6 +1050,8 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 			prefs.emplace(std::move(key), std::move(value));
 		}
 		if (stream.status() == QDataStream::Ok) {
+			// ImpulseM: record whether the stored prefs already carry the marker.
+			trayBrandDefaultStored = prefs.find(QByteArray("impulse_tray_brand_default")) != end(prefs);
 			_prefs = std::move(prefs);
 		}
 	}
@@ -1300,6 +1306,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_storiesClickTooltipHidden = (storiesClickTooltipHidden == 1);
 	_recentEmojiSkip = std::move(recentEmojiSkip);
 	_trayIconMonochrome = (trayIconMonochrome == 1);
+	// ImpulseM: profiles saved before the brand disc default are reset to it once.
+	if (!trayBrandDefaultStored) {
+		_trayIconMonochrome = false;
+		writePrefGeneric("impulse_tray_brand_default", "\x1"_q);
+	}
 	_ttlVoiceClickTooltipHidden = (ttlVoiceClickTooltipHidden == 1);
 	if (!ivPosition.isEmpty()) {
 		_ivPosition = Deserialize(ivPosition);

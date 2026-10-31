@@ -38,8 +38,6 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>im</string>
-				<string>tonsite</string>
-				<string>ton</string>
 			</array>
 		</dict>
 	</array>

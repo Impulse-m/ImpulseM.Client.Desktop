@@ -2139,52 +2139,28 @@ void Application::RegisterUrlScheme() {
 		? u"-workdir \"%1\""_q.arg(cWorkingDir())
 		: QString();
 
-	// WHY: an older build registered tg:// for this executable. The removal
-	// only touches a registration that points here, and it must run before
-	// the registrations below, which recreate the shared application keys.
-	base::Platform::UnregisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = arguments,
-		.protocol = u"tg"_q,
-		.protocolName = u"ImpulseM Link"_q,
-		.shortAppName = u"impulsem"_q,
-		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
-	});
+	const auto descriptor = [=](const QString &protocol, const QString &protocolName) {
+		return base::Platform::UrlSchemeDescriptor{
+			.executable = Platform::ExecutablePathForShortcuts(),
+			.arguments = arguments,
+			.protocol = protocol,
+			.protocolName = protocolName,
+			.shortAppName = u"impulsem"_q,
+			.longAppName = QCoreApplication::applicationName(),
+			.displayAppName = AppName.utf16(),
+			.displayAppDescription = AppName.utf16(),
+		};
+	};
 
-	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = arguments,
-		.protocol = u"im"_q,
-		.protocolName = u"ImpulseM Link"_q,
-		.shortAppName = u"impulsem"_q,
-		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
-	});
+	// WHY: older builds registered tg://, tonsite:// and ton:// for this
+	// executable. The removals only touch registrations that point here, and
+	// they must run before the registration below, which recreates the shared
+	// application keys.
+	base::Platform::UnregisterUrlScheme(descriptor(u"tg"_q, u"ImpulseM Link"_q));
+	base::Platform::UnregisterUrlScheme(descriptor(u"tonsite"_q, u"TonSite Link"_q));
+	base::Platform::UnregisterUrlScheme(descriptor(u"ton"_q, u"Ton Link"_q));
 
-	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = arguments,
-		.protocol = u"tonsite"_q,
-		.protocolName = u"TonSite Link"_q,
-		.shortAppName = u"impulsem"_q,
-		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
-	});
-
-	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
-		.executable = Platform::ExecutablePathForShortcuts(),
-		.arguments = arguments,
-		.protocol = u"ton"_q,
-		.protocolName = u"Ton Link"_q,
-		.shortAppName = u"impulsem"_q,
-		.longAppName = QCoreApplication::applicationName(),
-		.displayAppName = AppName.utf16(),
-		.displayAppDescription = AppName.utf16(),
-	});
+	base::Platform::RegisterUrlScheme(descriptor(u"im"_q, u"ImpulseM Link"_q));
 }
 
 bool IsAppLaunched() {

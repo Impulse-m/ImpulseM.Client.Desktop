@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/editor/iv_editor_clipboard_import.h"
 
+#include "core/local_url_handlers.h"
 #include "core/mime_type.h"
 #include "iv/editor/iv_editor_page_blocks.h"
 #include "iv/editor/iv_editor_session.h"
@@ -159,11 +160,12 @@ constexpr auto kMaxDataUriHeaderLength = 256;
 [[nodiscard]] uint64 MediaIdFromIdentity(
 		const QString &identity,
 		const QString &kind) {
+	const auto normalized = Core::NormalizeLinkScheme(identity);
 	const auto prefix = u"tg://"_q + kind + u"?"_q;
-	if (!identity.startsWith(prefix, Qt::CaseInsensitive)) {
+	if (!normalized.startsWith(prefix, Qt::CaseInsensitive)) {
 		return 0;
 	}
-	const auto query = QUrlQuery(identity.mid(prefix.size()));
+	const auto query = QUrlQuery(normalized.mid(prefix.size()));
 	const auto value = query.queryItemValue(u"id"_q);
 	auto ok = false;
 	const auto result = value.toULongLong(&ok);

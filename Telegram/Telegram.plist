@@ -37,7 +37,7 @@
 			<string>@bundle_identifier_plist@</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>tg</string>
+				<string>im</string>
 				<string>tonsite</string>
 				<string>ton</string>
 			</array>

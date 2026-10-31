@@ -1005,6 +1005,7 @@ std::optional<QByteArray> SafeMessageHref(const QByteArray &value) {
 		u"https"_q,
 		u"mailto"_q,
 		u"tel"_q,
+		u"im"_q,
 		u"tg"_q,
 	};
 	static const auto kHostSchemes = std::array{

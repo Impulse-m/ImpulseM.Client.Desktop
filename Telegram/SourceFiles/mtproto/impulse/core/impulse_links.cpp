@@ -70,7 +70,15 @@ std::optional<std::string> ShortLinkPath(
 }
 
 bool IsInternalScheme(std::string_view url) {
-	return StartsWithIgnoreCase(url, "tg://");
+	return StartsWithIgnoreCase(url, "tg://")
+		|| StartsWithIgnoreCase(url, "im://");
+}
+
+std::string ToInternalScheme(std::string_view url) {
+	if (!StartsWithIgnoreCase(url, "im://")) {
+		return std::string(url);
+	}
+	return "tg://" + std::string(url.substr(5));
 }
 
 } // namespace Impulse::Links

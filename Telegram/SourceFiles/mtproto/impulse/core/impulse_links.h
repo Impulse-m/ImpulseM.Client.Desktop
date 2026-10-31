@@ -21,7 +21,11 @@ namespace Impulse::Links {
 	std::string_view url,
 	std::string_view configHost);
 
-// True for internal tg:// URLs, the scheme is matched ignoring case.
+// True for internal tg:// and im:// URLs, the scheme is matched ignoring case.
 [[nodiscard]] bool IsInternalScheme(std::string_view url);
+
+// Rewrites an im:// URL to the tg:// form used for internal routing, the rest
+// of the URL is kept as is. Any other URL is returned unchanged.
+[[nodiscard]] std::string ToInternalScheme(std::string_view url);
 
 } // namespace Impulse::Links

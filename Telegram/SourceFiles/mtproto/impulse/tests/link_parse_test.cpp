@@ -71,6 +71,16 @@ IMPULSE_TEST(LinkParseTgSchemeIsInternal) {
 	IMPULSE_CHECK(!Impulse::Links::ShortLinkPath("tg://resolve?domain=x", "").has_value());
 }
 
+IMPULSE_TEST(LinkParseImSchemeIsInternal) {
+	IMPULSE_CHECK(Impulse::Links::IsInternalScheme("im://resolve?domain=x"));
+	IMPULSE_CHECK(Impulse::Links::IsInternalScheme("IM://resolve?domain=x"));
+	IMPULSE_CHECK(!Impulse::Links::IsInternalScheme("im:"));
+	IMPULSE_CHECK(Impulse::Links::ToInternalScheme("im://login?token=abc") == "tg://login?token=abc");
+	IMPULSE_CHECK(Impulse::Links::ToInternalScheme("IM://join?invite=x") == "tg://join?invite=x");
+	IMPULSE_CHECK(Impulse::Links::ToInternalScheme("tg://resolve?domain=x") == "tg://resolve?domain=x");
+	IMPULSE_CHECK(Impulse::Links::ToInternalScheme("https://t.me/x") == "https://t.me/x");
+}
+
 IMPULSE_TEST(LinkParsePrefixHost) {
 	IMPULSE_CHECK(Impulse::Links::PrefixHost("https://o.example.org/") == "o.example.org");
 	IMPULSE_CHECK(Impulse::Links::PrefixHost("https://O.Example.org:8443/") == "o.example.org");

@@ -154,7 +154,7 @@ void SetCrashAnnotationsGL() {
 base::options::toggle OptionSkipUrlSchemeRegister({
 	.id = kOptionSkipUrlSchemeRegister,
 	.name = "Skip URL scheme register",
-	.description = "Don't re-register tg:// URL scheme on autoupdate.",
+	.description = "Don't re-register im:// URL scheme on autoupdate.",
 });
 
 } // namespace
@@ -1319,7 +1319,7 @@ void Application::registerWindowActivation(not_null<QWidget*> window) {
 }
 
 bool Application::openLocalUrl(const QString &url, QVariant context) {
-	const auto urlTrimmed = url.trimmed();
+	const auto urlTrimmed = NormalizeLinkScheme(url.trimmed());
 	const auto protocol = u"tg://"_q;
 	if (urlTrimmed.startsWith(protocol, Qt::CaseInsensitive)
 		&& !passcodeLocked()) {
@@ -1334,7 +1334,7 @@ bool Application::openLocalUrl(const QString &url, QVariant context) {
 			return true;
 		}
 	}
-	return openCustomUrl("tg://", LocalUrlHandlers(), url, context);
+	return openCustomUrl("tg://", LocalUrlHandlers(), urlTrimmed, context);
 }
 
 bool Application::openInternalUrl(const QString &url, QVariant context) {
@@ -2139,10 +2139,24 @@ void Application::RegisterUrlScheme() {
 		? u"-workdir \"%1\""_q.arg(cWorkingDir())
 		: QString();
 
-	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
+	// WHY: an older build registered tg:// for this executable. The removal
+	// only touches a registration that points here, and it must run before
+	// the registrations below, which recreate the shared application keys.
+	base::Platform::UnregisterUrlScheme(base::Platform::UrlSchemeDescriptor{
 		.executable = Platform::ExecutablePathForShortcuts(),
 		.arguments = arguments,
 		.protocol = u"tg"_q,
+		.protocolName = u"ImpulseM Link"_q,
+		.shortAppName = u"impulsem"_q,
+		.longAppName = QCoreApplication::applicationName(),
+		.displayAppName = AppName.utf16(),
+		.displayAppDescription = AppName.utf16(),
+	});
+
+	base::Platform::RegisterUrlScheme(base::Platform::UrlSchemeDescriptor{
+		.executable = Platform::ExecutablePathForShortcuts(),
+		.arguments = arguments,
+		.protocol = u"im"_q,
 		.protocolName = u"ImpulseM Link"_q,
 		.shortAppName = u"impulsem"_q,
 		.longAppName = QCoreApplication::applicationName(),

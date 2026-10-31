@@ -143,7 +143,7 @@ struct TopButtonMenuState {
 
 [[nodiscard]] QString ProxyDataToLocalLink(const ProxyData &proxy) {
 	const auto queryPath = ProxyDataToQueryPath(proxy);
-	return queryPath.isEmpty() ? QString() : (u"tg://"_q + queryPath);
+	return queryPath.isEmpty() ? QString() : (u"im://"_q + queryPath);
 }
 
 [[nodiscard]] QString ProxyDataToPublicLink(

@@ -40,6 +40,7 @@ struct LocalUrlHandler {
 [[nodiscard]] const std::vector<LocalUrlHandler> &LocalUrlHandlers();
 [[nodiscard]] const std::vector<LocalUrlHandler> &InternalUrlHandlers();
 
+[[nodiscard]] QString NormalizeLinkScheme(const QString &url);
 [[nodiscard]] QString TryConvertUrlToLocal(QString url);
 [[nodiscard]] QString InternalLinksPrefix();
 [[nodiscard]] bool IsGetPremiumLocalUrl(const QString &url);

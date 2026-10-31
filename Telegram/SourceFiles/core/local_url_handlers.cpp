@@ -2085,10 +2085,16 @@ QString InternalLinksPrefix() {
 	return host.isEmpty() ? QString() : u"https://"_q + host;
 }
 
+QString NormalizeLinkScheme(const QString &url) {
+	return QString::fromStdString(
+		Impulse::Links::ToInternalScheme(url.toStdString()));
+}
+
 QString TryConvertUrlToLocal(QString url) {
 	if (url.size() > 8192) {
 		url = url.mid(0, 8192);
 	}
+	url = NormalizeLinkScheme(url);
 	if (url.startsWith(u"tc://"_q, Qt::CaseInsensitive)) {
 		const auto query = url.indexOf('?');
 		return u"tg://sendgrams?startapp="_q
@@ -2318,7 +2324,7 @@ struct InternalLinkCheckResult {
 };
 
 [[nodiscard]] InternalLinkCheckResult InternalLinkCheck(const QString &url) {
-	const auto urlTrimmed = url.trimmed();
+	const auto urlTrimmed = NormalizeLinkScheme(url.trimmed());
 	if (!urlTrimmed.startsWith(u"tg://"_q, Qt::CaseInsensitive)) {
 		return {};
 	}

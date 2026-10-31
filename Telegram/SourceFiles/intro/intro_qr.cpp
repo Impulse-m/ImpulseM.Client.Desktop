@@ -486,7 +486,7 @@ void QrWidget::showTokenError(const MTP::Error &error) {
 
 void QrWidget::showToken(const QByteArray &token) {
 	const auto encoded = token.toBase64(QByteArray::Base64UrlEncoding);
-	_qrCodes.fire_copy("tg://login?token=" + encoded);
+	_qrCodes.fire_copy("im://login?token=" + encoded);
 }
 
 void QrWidget::importTo(MTP::DcId dcId, const QByteArray &token) {

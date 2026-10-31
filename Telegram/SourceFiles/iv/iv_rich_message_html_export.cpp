@@ -70,12 +70,12 @@ constexpr auto kClipboardFormulaLimit = int64(2) * 1024 * 1024;
 		uint64 documentId) {
 	if (kind == RichPage::BlockKind::Photo) {
 		return photoId
-			? u" data-tg-src=\"tg://photo?id=%1\""_q.arg(photoId)
+			? u" data-tg-src=\"im://photo?id=%1\""_q.arg(photoId)
 			: QString();
 	} else if (!documentId) {
 		return QString();
 	}
-	return u" data-tg-src=\"tg://%1?id=%2\""_q.arg(
+	return u" data-tg-src=\"im://%1?id=%2\""_q.arg(
 		((kind == RichPage::BlockKind::Audio) ? u"audio"_q : u"video"_q),
 		QString::number(documentId));
 }
@@ -154,6 +154,7 @@ void AppendEscaped(QString *out, QStringView value, bool lineBreaks) {
 	const auto allowed = std::array{
 		u"http://"_q,
 		u"https://"_q,
+		u"im://"_q,
 		u"tg://"_q,
 		u"mailto:"_q,
 		u"tel:"_q,
@@ -373,7 +374,7 @@ struct EntityTags {
 		const auto fields = TextUtilities::MentionNameDataToFields(
 			entity.data());
 		return fields.userId
-			? LinkTags(u"tg://user?id=%1"_q.arg(fields.userId))
+			? LinkTags(u"im://user?id=%1"_q.arg(fields.userId))
 			: EntityTags();
 	}
 	case EntityType::CustomEmoji:

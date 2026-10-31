@@ -47,26 +47,8 @@ constexpr auto kShadowAlpha = 0.13;
 constexpr auto kImageScale = 4;
 constexpr auto kQrOversample = 2;
 constexpr auto kSolveIterations = 24;
-constexpr auto kPlaneCenterX = 0.46;
-constexpr auto kPlaneCenterY = 0.525;
 constexpr auto kBloomDuration = crl::time(800);
 constexpr auto kBloomSpread = 0.6;
-constexpr auto kFlyInDuration = crl::time(500);
-constexpr auto kLoopPeriod = crl::time(900);
-constexpr auto kPlaneMinWidth = 0.44;
-constexpr auto kPlaneAxisAngle = 35.;
-constexpr auto kPlaneAxisX = 0.452;
-constexpr auto kPlaneAxisY = 0.394;
-constexpr auto kPlaneTurn = 8.6;
-constexpr auto kFlyInOffset = 0.55;
-constexpr auto kFlyInScale = 0.5;
-constexpr auto kStreakAlpha = 0.18;
-constexpr auto kStreakLength = 0.45;
-constexpr auto kStreakWidth = 0.05;
-constexpr auto kStreakTravel = 2.5;
-constexpr auto kStreakSourceAngle = 39.;
-constexpr auto kStreakSourceDistance = 2.5;
-constexpr auto kStreakLanes = std::array{ -0.78, -0.58, 0.66, -0.38, 0.80 };
 constexpr auto kSwapDelay = crl::time(40);
 constexpr auto kSwapDuration = crl::time(450);
 constexpr auto kSwapTravel = crl::time(350);
@@ -110,7 +92,7 @@ struct CardContent {
 	QImage shadow;
 	QImage qr;
 	Qr::Data data;
-	QImage plane;
+	QImage logo;
 	UsernameFit username;
 	QColor ink;
 	QPoint shadowPosition;
@@ -122,18 +104,7 @@ struct QrSwap {
 	crl::time startedAt = 0;
 };
 
-struct PlaneState {
-	QPointF shift;
-	float64 scale = 1.;
-	float64 width = 1.;
-	float64 rotation = 0.;
-	float64 opacity = 1.;
-	float64 streaks = 0.;
-	float64 travel = 0.;
-};
-
 struct CardFrame {
-	PlaneState plane;
 	float64 bloom = 1.;
 	const QrSwap *swap = nullptr;
 	crl::time swapElapsed = 0;
@@ -435,7 +406,7 @@ struct BackgroundRequest {
 		anim::with_alpha(QColor(0, 0, 0), alpha));
 }
 
-[[nodiscard]] QImage PreparePlane(int side, int ratio) {
+[[nodiscard]] QImage PrepareLogo(int side, int ratio) {
 	auto result = QImage(
 		QSize(side, side) * ratio,
 		QImage::Format_ARGB32_Premultiplied);
@@ -468,7 +439,7 @@ struct BackgroundRequest {
 			ratio),
 		.qr = std::move(qr),
 		.data = std::move(data),
-		.plane = PreparePlane(layout.logo.width(), ratio),
+		.logo = PrepareLogo(layout.logo.width(), ratio),
 		.ink = ink,
 		.shadowPosition = QPoint(-shadowRadius, shadowShift - shadowRadius),
 	};
@@ -632,103 +603,10 @@ void ClipOutside(
 	p.setClipPath(outside, Qt::IntersectClip);
 }
 
-[[nodiscard]] PlaneState ComputePlaneState(
-		crl::time elapsed,
-		float64 radius) {
-	const auto travel = float64(elapsed % kLoopPeriod) / kLoopPeriod;
-	if (elapsed < kFlyInDuration) {
-		const auto progress = float64(elapsed) / kFlyInDuration;
-		const auto eased = anim::easeOutCubic(1., progress);
-		const auto offset = kFlyInOffset * radius * (1. - eased) / M_SQRT2;
-		return {
-			.shift = QPointF(-offset, offset),
-			.scale = kFlyInScale + (1. - kFlyInScale) * eased,
-			.opacity = std::min(2. * progress, 1.),
-			.streaks = progress,
-			.travel = travel,
-		};
-	}
-	const auto phase = float64((elapsed - kFlyInDuration) % kLoopPeriod)
-		/ kLoopPeriod;
-	const auto roll = (1. - std::cos(2. * M_PI * phase)) / 2.;
+[[nodiscard]] CardFrame ComputeCardFrame(crl::time elapsed) {
 	return {
-		.width = 1. - (1. - kPlaneMinWidth) * roll,
-		.rotation = -kPlaneTurn * roll,
-		.streaks = 1.,
-		.travel = travel,
-	};
-}
-
-[[nodiscard]] CardFrame ComputeCardFrame(
-		crl::time elapsed,
-		float64 radius) {
-	return {
-		.plane = ComputePlaneState(elapsed, radius),
 		.bloom = std::min(float64(elapsed) / kBloomDuration, 1.),
 	};
-}
-
-void PaintStreaks(QPainter &p, const QRect &logo, const PlaneState &state) {
-	const auto radius = logo.width() / 2.;
-	const auto center = QRectF(logo).center();
-	const auto half = kStreakLength * radius / 2.;
-	const auto angle = kStreakSourceAngle * M_PI / 180.;
-	const auto distance = kStreakSourceDistance * radius;
-	// Lanes share one vanishing point, so no two streaks cross in the circle.
-	const auto source = center
-		+ QPointF(std::cos(angle), -std::sin(angle)) * distance;
-	auto color = QColor(255, 255, 255);
-	color.setAlphaF(kStreakAlpha * state.streaks);
-	p.setPen(QPen(
-		color,
-		kStreakWidth * radius,
-		Qt::SolidLine,
-		Qt::RoundCap));
-	const auto count = int(kStreakLanes.size());
-	for (auto i = 0; i != count; ++i) {
-		const auto lane = angle
-			+ std::asin(kStreakLanes[i] / kStreakSourceDistance);
-		const auto along = QPointF(std::cos(lane), -std::sin(lane));
-		const auto foot = source
-			- along * QPointF::dotProduct(source - center, along);
-		const auto travel = std::fmod(state.travel + float64(i) / count, 1.);
-		const auto middle = foot
-			+ along * (kStreakTravel * radius * (0.5 - travel));
-		p.drawLine(middle - along * half, middle + along * half);
-	}
-}
-
-void PaintPlane(
-		QPainter &p,
-		const QRect &logo,
-		const QImage &plane,
-		const PlaneState &state) {
-	if (state.opacity <= 0.) {
-		return;
-	}
-	const auto center = QPointF(
-		logo.x() + logo.width() * kPlaneCenterX,
-		logo.y() + logo.height() * kPlaneCenterY);
-	const auto anchor = QPointF(
-		logo.x() + logo.width() * kPlaneAxisX,
-		logo.y() + logo.height() * kPlaneAxisY);
-	auto circle = QPainterPath();
-	circle.addEllipse(logo);
-	p.save();
-	p.setClipPath(circle);
-	if (state.streaks > 0.) {
-		PaintStreaks(p, logo, state);
-	}
-	p.translate(center + state.shift);
-	p.scale(state.scale, state.scale);
-	p.translate(anchor - center);
-	p.rotate(state.rotation - kPlaneAxisAngle);
-	p.scale(1., state.width);
-	p.rotate(kPlaneAxisAngle);
-	p.translate(-anchor);
-	p.setOpacity(state.opacity);
-	p.drawImage(logo, plane);
-	p.restore();
 }
 
 void PaintUsername(
@@ -937,7 +815,7 @@ void PaintCard(
 		}
 		p.setBrush(content.ink);
 		p.drawEllipse(layout.logo);
-		PaintPlane(p, layout.logo, content.plane, frame.plane);
+		p.drawImage(layout.logo, content.logo);
 	}
 	if (paintUsername && !content.username.lines.isEmpty()) {
 		PaintUsername(p, layout.band, content.username, content.ink);
@@ -1460,7 +1338,7 @@ void PeerQrSurface::paintEvent(QPaintEvent *e) {
 	const auto elapsed = (_startedAt > 0) ? (now - _startedAt) : 0;
 	auto frame = still
 		? CardFrame()
-		: ComputeCardFrame(elapsed, _card->layout.logo.width() / 2.);
+		: ComputeCardFrame(elapsed);
 	const auto placed = cardScale();
 	p.translate(cardRect().topLeft());
 	if (placed != 1.) {
@@ -1691,8 +1569,10 @@ bool PeerQrSurface::animationCallback(crl::time now) {
 			_bounceStartedAt = 0;
 		}
 		refresh(cardUpdateRect());
+	} else if (!whole) {
+		return false;
 	} else {
-		refresh(logoRect());
+		updateField();
 	}
 	return true;
 }
@@ -1788,17 +1668,6 @@ QRectF PeerQrSurface::cardRect() const {
 
 float64 PeerQrSurface::cardScale() const {
 	return _cardPlacement ? _cardPlacement->scale : 1.;
-}
-
-QRect PeerQrSurface::logoRect() const {
-	if (_cardGeometry.isEmpty()) {
-		return rect();
-	}
-	const auto scale = cardScale();
-	const auto logo = QRectF(_card->layout.logo);
-	return QRectF(
-		cardRect().topLeft() + logo.topLeft() * scale,
-		logo.size() * scale).toAlignedRect();
 }
 
 QRect PeerQrSurface::cardUpdateRect() const {

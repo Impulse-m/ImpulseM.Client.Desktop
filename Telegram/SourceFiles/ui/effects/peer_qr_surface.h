@@ -178,7 +178,6 @@ private:
 	void updateField();
 	[[nodiscard]] QRectF cardRect() const;
 	[[nodiscard]] float64 cardScale() const;
-	[[nodiscard]] QRect logoRect() const;
 	[[nodiscard]] QRect cardUpdateRect() const;
 	[[nodiscard]] QRect labelUpdateRect() const;
 

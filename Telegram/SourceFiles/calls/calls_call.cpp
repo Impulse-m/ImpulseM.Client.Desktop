@@ -211,6 +211,16 @@ uint64 ComputeFingerprint(bytes::const_span authKey) {
 	return enabled ? State::Active : State::Inactive;
 }
 
+// The LiveKit instance takes the endpoint id of a device. The default device is
+// resolved to the endpoint id of the system default, which is passed as well,
+// since the library default of the platform audio can be another device.
+[[nodiscard]] std::string DeviceIdForInstance(
+		const Webrtc::DeviceResolvedId &deviceId) {
+	return (deviceId.value == Webrtc::kDefaultDeviceId)
+		? std::string()
+		: deviceId.value.toStdString();
+}
+
 } // namespace
 
 Call::Call(
@@ -549,21 +559,21 @@ void Call::setupMediaDevices() {
 	Expects(!conferenceInvite());
 
 	_playbackDeviceId.changes() | rpl::filter([=] {
-		return _instance && _setDeviceIdCallback;
+		return _instance != nullptr;
 	}) | rpl::on_next([=](const Webrtc::DeviceResolvedId &deviceId) {
-		_setDeviceIdCallback(deviceId);
-
-		// Value doesn't matter here, just trigger reading of the new value.
-		_instance->setAudioOutputDevice(deviceId.value.toStdString());
+		if (_setDeviceIdCallback) {
+			_setDeviceIdCallback(deviceId);
+		}
+		_instance->setAudioOutputDevice(DeviceIdForInstance(deviceId));
 	}, _lifetime);
 
 	_captureDeviceId.changes() | rpl::filter([=] {
-		return _instance && _setDeviceIdCallback;
+		return _instance != nullptr;
 	}) | rpl::on_next([=](const Webrtc::DeviceResolvedId &deviceId) {
-		_setDeviceIdCallback(deviceId);
-
-		// Value doesn't matter here, just trigger reading of the new value.
-		_instance->setAudioInputDevice(deviceId.value.toStdString());
+		if (_setDeviceIdCallback) {
+			_setDeviceIdCallback(deviceId);
+		}
+		_instance->setAudioInputDevice(DeviceIdForInstance(deviceId));
 	}, _lifetime);
 }
 
@@ -1161,17 +1171,12 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 			const auto playback = _playbackDeviceId.current();
 			if (_instance && playback != playbackDeviceIdInitial) {
 				_setDeviceIdCallback(playback);
-
-				// Value doesn't matter here, just trigger reading of the...
-				_instance->setAudioOutputDevice(
-					playback.value.toStdString());
+				_instance->setAudioOutputDevice(DeviceIdForInstance(playback));
 			}
 			const auto capture = _captureDeviceId.current();
 			if (_instance && capture != captureDeviceIdInitial) {
 				_setDeviceIdCallback(capture);
-
-				// Value doesn't matter here, just trigger reading of the...
-				_instance->setAudioInputDevice(capture.value.toStdString());
+				_instance->setAudioInputDevice(DeviceIdForInstance(capture));
 			}
 		});
 	};
@@ -1194,8 +1199,8 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 			std::move(encryptionKeyValue),
 			(_type == Type::Outgoing)),
 		.mediaDevicesConfig = tgcalls::MediaDevicesConfig{
-			.audioInputId = captureDeviceIdInitial.value.toStdString(),
-			.audioOutputId = playbackDeviceIdInitial.value.toStdString(),
+			.audioInputId = DeviceIdForInstance(captureDeviceIdInitial),
+			.audioOutputId = DeviceIdForInstance(playbackDeviceIdInitial),
 			.inputVolume = 1.f,//settings.callInputVolume() / 100.f,
 			.outputVolume = 1.f,//settings.callOutputVolume() / 100.f,
 		},

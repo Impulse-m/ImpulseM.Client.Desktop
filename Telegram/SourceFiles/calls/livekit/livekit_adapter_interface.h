@@ -30,9 +30,13 @@ struct LiveKitVideoPlane final {
 	std::uint32_t stride = 0;
 };
 
-// One decoded frame of a remote video track. The planes are Y, U and V.
+// One decoded frame of a remote video track. The planes are Y, U and V. The
+// source tells a camera frame from a screen share frame, and the track sid names
+// the track the frame came from.
 struct LiveKitVideoFrame final {
 	std::string participantIdentity;
+	std::string trackSid;
+	LiveKitTrackSource source = LiveKitTrackSource::Unknown;
 	std::uint32_t width = 0;
 	std::uint32_t height = 0;
 	std::int64_t timestampUs = 0;
@@ -47,6 +51,19 @@ struct LiveKitCapturedFrame final {
 	std::uint32_t height = 0;
 	std::int64_t timestampUs = 0;
 	std::array<LiveKitVideoPlane, 3> planes;
+};
+
+// One remote track of the room, as the adapter tracks it by its sid. The track
+// is kept from its publication until it is unpublished, and the participant's
+// tracks go when the participant leaves. The muted state comes from the
+// publication info and the mute events of the room.
+struct LiveKitRemoteMedia final {
+	std::string participantIdentity;
+	std::string trackSid;
+	LiveKitTrackKind kind = LiveKitTrackKind::Unknown;
+	LiveKitTrackSource source = LiveKitTrackSource::Unknown;
+	bool muted = false;
+	bool subscribed = false;
 };
 
 // Receives the frames of every subscribed remote video track. It is called on
@@ -70,6 +87,20 @@ public:
 	virtual void liveKitFailed(const std::string &message) = 0;
 	virtual void liveKitDisconnected() = 0;
 
+	// Fires on the owner thread after every change of the remote tracks of the
+	// room, with the full current snapshot. The snapshot is empty once the room
+	// is released.
+	virtual void liveKitRemoteMediaChanged(const std::vector<LiveKitRemoteMedia> &) {}
+
+	// Fires on the owner thread with the answer to requestSessionStats. An
+	// error is reported as stats with the error flag set; it never fails the
+	// room.
+	virtual void liveKitSessionStats(const LiveKitSessionStats &) {}
+
+	// Receives one diagnostic line of the adapter. The lines carry no URL, no
+	// token, no key and no SDK text. It is called on the owner thread.
+	virtual void liveKitLog(const std::string &) {}
+
 	virtual ~LiveKitAdapterDelegate() = default;
 };
 
@@ -87,6 +118,12 @@ public:
 	// Sets the sink of the remote video frames. nullptr stops delivery. Frames
 	// of a track that is subscribed before the sink is set are delivered too.
 	virtual void setVideoSink(LiveKitVideoSink *sink) = 0;
+
+	// Sets the only remote video track whose frames are copied and delivered,
+	// by its sid; an empty sid delivers none. Frames of every other track are
+	// dropped on the library thread, before the copy. Until this is called, the
+	// frames of every subscribed video track are delivered.
+	virtual void setShownVideoTrack(const std::string &trackSid) = 0;
 
 	// Starts the room connection. Returns false when the adapter is not idle.
 	// The result arrives through liveKitConnected or liveKitFailed. A connected
@@ -131,12 +168,33 @@ public:
 	// then failed.
 	virtual bool setCameraEnabled(bool enabled) = 0;
 
+	// Enables or disables the screen share track, as setCameraEnabled does for
+	// the camera. The state starts enabled and applies to a screen share
+	// published later. Returns false when the library did not confirm the
+	// request; the room is then failed.
+	virtual bool setScreenShareEnabled(bool enabled) = 0;
+
 	// Sets the noise suppression of the microphone, on by default as on Android.
 	// The library takes it with the microphone source, so it applies to the
 	// microphone that is published next. The library has no request that changes
 	// an existing source, so a change while a microphone source exists returns
 	// false; the value is still kept for the next microphone.
 	virtual bool setNoiseSuppression(bool enabled) = 0;
+
+	// Selects the playout (speaker) device by its endpoint id, as the settings
+	// hold it, for example "{0.0.0.00000000}.{64b65051-f89c-4e68-ab68-1eb3b88dac2c}".
+	// The id is kept until it is applied. Before PlatformAudio exists the id is
+	// only stored, and it is applied when PlatformAudio is created; after that
+	// the call applies it at once. An empty id switches back to the default device:
+	// after an earlier selection it selects the first listed device, and with no
+	// earlier selection it changes nothing. An id that is not listed by the library
+	// changes nothing and is only logged; neither fails the room. Returns false
+	// when the library reports an error.
+	virtual bool setPlayoutDevice(const std::string &deviceId) = 0;
+
+	// Selects the recording (microphone) device, as setPlayoutDevice does for the
+	// playout device.
+	virtual bool setRecordingDevice(const std::string &deviceId) = 0;
 
 	// Sets the simulcast layer of the video of a remote participant, by the
 	// participant identity. The quality is kept for the adapter lifetime and
@@ -146,6 +204,12 @@ public:
 	virtual bool setRemoteVideoQuality(
 		const std::string &participantIdentity,
 		LiveKitVideoQuality quality) = 0;
+
+	// Requests the RTP stats of the session of the connected room. The answer
+	// arrives through liveKitSessionStats. Returns false when the room is not
+	// connected or the library rejects the request; the room is not failed for
+	// it.
+	virtual bool requestSessionStats() = 0;
 
 	// Leaves the room and releases every owned handle. liveKitDisconnected
 	// fires once the library confirms the disconnect.

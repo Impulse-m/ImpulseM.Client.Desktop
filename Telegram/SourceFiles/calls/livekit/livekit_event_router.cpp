@@ -61,7 +61,25 @@ void LiveKitEventRouter::removeRoute(RouteId id) {
 	routes.erase(id);
 }
 
+void LiveKitEventRouter::setLogSink(LogSink sink) {
+	std::lock_guard<std::mutex> lock(mutex);
+	logSink = std::move(sink);
+}
+
 void LiveKitEventRouter::dispatch(const LiveKitEvent &event) {
+	if (event.kind == LiveKitEventKind::Log) {
+		LogSink sink;
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			sink = logSink;
+		}
+		if (sink) {
+			for (const LiveKitLogRecord &record : event.logRecords) {
+				sink(record);
+			}
+		}
+		return;
+	}
 	const std::uint64_t keys[] = {
 		event.asyncId,
 		event.roomHandle.value_or(0),

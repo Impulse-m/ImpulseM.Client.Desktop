@@ -3,6 +3,7 @@
 #include "mtproto/impulse/core/wire.h"
 
 #include <span>
+#include <utility>
 
 namespace Impulse {
 namespace {
@@ -12,11 +13,15 @@ constexpr std::uint32_t kFfiRequestDispose = 2;
 constexpr std::uint32_t kFfiRequestConnect = 3;
 constexpr std::uint32_t kFfiRequestDisconnect = 4;
 constexpr std::uint32_t kFfiRequestPublishTrack = 5;
+constexpr std::uint32_t kFfiRequestGetSessionStats = 12;
 constexpr std::uint32_t kFfiRequestCreateVideoTrack = 15;
 constexpr std::uint32_t kFfiRequestCreateAudioTrack = 16;
 constexpr std::uint32_t kFfiRequestNewVideoSource = 21;
 constexpr std::uint32_t kFfiRequestNewAudioSource = 26;
 constexpr std::uint32_t kFfiRequestNewPlatformAudio = 77;
+constexpr std::uint32_t kFfiRequestGetAudioDevices = 78;
+constexpr std::uint32_t kFfiRequestSetRecordingDevice = 79;
+constexpr std::uint32_t kFfiRequestSetPlayoutDevice = 80;
 constexpr std::uint32_t kFfiRequestLocalTrackMute = 17;
 constexpr std::uint32_t kFfiResponseLocalTrackMute = 17;
 constexpr std::uint32_t kFfiRequestNewVideoStream = 20;
@@ -25,6 +30,10 @@ constexpr std::uint32_t kFfiRequestCaptureVideoFrame = 22;
 constexpr std::uint32_t kFfiResponseCaptureVideoFrame = 22;
 constexpr std::uint32_t kFfiRequestRemotePublicationQuality = 68;
 constexpr std::uint32_t kFfiResponseRemotePublicationQuality = 67;
+
+// FfiResponse fields of the responses that the codec decodes.
+constexpr std::uint32_t kFfiResponseNewPlatformAudio = 76;
+constexpr std::uint32_t kFfiResponseGetAudioDevices = 77;
 
 // CaptureVideoFrameRequest fields and the rotation of an unrotated frame.
 constexpr std::uint32_t kCaptureSourceHandle = 1;
@@ -84,6 +93,10 @@ constexpr const char *kRatchetSalt = "LKFrameEncryptionKey";
 constexpr std::uint32_t kDisconnectRoomHandle = 1;
 constexpr std::uint32_t kDisconnectRequestAsyncId = 2;
 
+// GetSessionStatsRequest fields.
+constexpr std::uint32_t kSessionStatsRoomHandle = 1;
+constexpr std::uint32_t kSessionStatsRequestAsyncId = 2;
+
 // ReadyForRoomEventRequest field.
 constexpr std::uint32_t kReadyRoomHandle = 1;
 
@@ -106,6 +119,26 @@ constexpr std::uint64_t kAudioSourceTypePlatform = 1;
 constexpr std::uint32_t kAudioOptionsEchoCancellation = 1;
 constexpr std::uint32_t kAudioOptionsNoiseSuppression = 2;
 constexpr std::uint32_t kAudioOptionsAutoGainControl = 3;
+
+// GetAudioDevicesRequest, SetRecordingDeviceRequest and SetPlayoutDeviceRequest
+// fields. The device lists of GetAudioDevicesResponse and the error of the set
+// responses are read with the constants below.
+constexpr std::uint32_t kDeviceRequestHandle = 1;
+constexpr std::uint32_t kDeviceRequestDeviceId = 2;
+constexpr std::uint32_t kDevicesPlaybackList = 1;
+constexpr std::uint32_t kDevicesRecordingList = 2;
+constexpr std::uint32_t kDevicesError = 3;
+constexpr std::uint32_t kDeviceInfoIndex = 1;
+constexpr std::uint32_t kDeviceInfoName = 2;
+constexpr std::uint32_t kDeviceInfoGuid = 3;
+constexpr std::uint32_t kSetDeviceError = 1;
+
+// NewPlatformAudioResponse holds OwnedPlatformAudio, which holds the
+// PlatformAudioInfo with the device counts.
+constexpr std::uint32_t kPlatformAudioOwned = 1;
+constexpr std::uint32_t kOwnedPlatformAudioInfo = 2;
+constexpr std::uint32_t kPlatformAudioRecordingCount = 1;
+constexpr std::uint32_t kPlatformAudioPlayoutCount = 2;
 
 // CreateAudioTrackRequest and CreateVideoTrackRequest fields.
 constexpr std::uint32_t kCreateTrackName = 1;
@@ -139,6 +172,8 @@ constexpr std::uint32_t kEventVideoStream = 3;
 constexpr std::uint32_t kEventConnect = 5;
 constexpr std::uint32_t kEventDisconnect = 7;
 constexpr std::uint32_t kEventPublishTrack = 9;
+constexpr std::uint32_t kEventLogs = 18;
+constexpr std::uint32_t kEventSessionStats = 19;
 
 // ConnectCallback fields.
 constexpr std::uint32_t kConnectCallbackError = 2;
@@ -149,14 +184,56 @@ constexpr std::uint32_t kConnectResultLocalParticipant = 2;
 // PublishTrackCallback field.
 constexpr std::uint32_t kPublishCallbackPublication = 3;
 
+// GetSessionStatsCallback fields and its Result.
+constexpr std::uint32_t kStatsCallbackAsyncId = 1;
+constexpr std::uint32_t kStatsCallbackError = 2;
+constexpr std::uint32_t kStatsCallbackResult = 3;
+constexpr std::uint32_t kStatsResultPublisher = 1;
+constexpr std::uint32_t kStatsResultSubscriber = 2;
+
+// RtcStats oneof members that the codec reads, and the fields of the RTP
+// stream messages (stats.proto). The stream and the kind are shared by the
+// inbound and the outbound RTP stats.
+constexpr std::uint32_t kRtcStatsInboundRtp = 4;
+constexpr std::uint32_t kRtcStatsOutboundRtp = 5;
+constexpr std::uint32_t kRtpStreamField = 2;
+constexpr std::uint32_t kRtpStreamKind = 2;
+constexpr std::uint32_t kOutboundSentField = 3;
+constexpr std::uint32_t kSentPacketsSent = 1;
+constexpr std::uint32_t kSentBytesSent = 2;
+constexpr std::uint32_t kInboundReceivedField = 3;
+constexpr std::uint32_t kReceivedPacketsReceived = 1;
+constexpr std::uint32_t kReceivedPacketsLost = 2;
+constexpr std::uint32_t kInboundStatsField = 4;
+constexpr std::uint32_t kInboundFramesDecoded = 4;
+constexpr std::uint32_t kInboundBytesReceived = 25;
+constexpr std::uint32_t kInboundTotalSamplesReceived = 35;
+constexpr std::uint32_t kInboundAudioLevel = 41;
+
+// LogBatch and LogRecord fields (livekit-ffi protocol).
+constexpr std::uint32_t kLogBatchRecords = 1;
+constexpr std::uint32_t kLogRecordLevel = 1;
+constexpr std::uint32_t kLogRecordTarget = 2;
+constexpr std::uint32_t kLogRecordMessage = 6;
+
 // RoomEvent fields and the oneof members the adapter reads.
 constexpr std::uint32_t kRoomEventHandle = 1;
+constexpr std::uint32_t kRoomEventParticipantDisconnected = 3;
 constexpr std::uint32_t kRoomEventTrackSubscribed = 9;
 constexpr std::uint32_t kRoomEventTrackUnsubscribed = 10;
+constexpr std::uint32_t kRoomEventTrackMuted = 12;
+constexpr std::uint32_t kRoomEventTrackUnmuted = 13;
 constexpr std::uint32_t kRoomEventDisconnected = 22;
 constexpr std::uint32_t kRoomEventE2eeStateChanged = 25;
 constexpr std::uint32_t kRoomEventTrackPublished = 7;
 constexpr std::uint32_t kRoomEventTrackUnpublished = 8;
+
+// ParticipantDisconnected.participant_identity.
+constexpr std::uint32_t kParticipantDisconnectedIdentity = 1;
+
+// TrackMuted and TrackUnmuted fields: the participant identity and the track sid.
+constexpr std::uint32_t kTrackMuteIdentity = 1;
+constexpr std::uint32_t kTrackMuteSid = 2;
 
 // Disconnected.reason, and the DisconnectReason value of a disconnect that this
 // client asked for (participant.proto).
@@ -181,11 +258,23 @@ constexpr std::uint32_t kTrackUnpublishedIdentity = 1;
 constexpr std::uint32_t kTrackUnpublishedSid = 2;
 
 // OwnedTrack and TrackInfo fields. TrackInfo.kind is TrackKind: 1 audio, 2 video.
+// TrackInfo.muted is the mute state of a subscribed track.
 constexpr std::uint32_t kOwnedTrackInfo = 2;
 constexpr std::uint32_t kTrackInfoSid = 1;
 constexpr std::uint32_t kTrackInfoKind = 3;
+constexpr std::uint32_t kTrackInfoMuted = 5;
 constexpr std::uint64_t kTrackKindAudio = 1;
 constexpr std::uint64_t kTrackKindVideo = 2;
+
+// TrackPublicationInfo.source and TrackPublicationInfo.muted.
+constexpr std::uint32_t kTrackPublicationInfoSource = 4;
+constexpr std::uint32_t kTrackPublicationInfoMuted = 9;
+
+// TrackSource values of the publication info (track.proto).
+constexpr std::uint64_t kTrackSourceCamera = 1;
+constexpr std::uint64_t kTrackSourceMicrophone = 2;
+constexpr std::uint64_t kTrackSourceScreenShare = 3;
+constexpr std::uint64_t kTrackSourceScreenShareAudio = 4;
 
 // VideoStreamEvent, VideoFrameReceived, OwnedVideoBuffer, VideoBufferInfo and
 // its ComponentInfo fields.
@@ -253,6 +342,24 @@ constexpr std::uint32_t kComponentSize = 3;
 	return std::nullopt;
 }
 
+[[nodiscard]] std::optional<double> FindDouble(
+		std::span<const std::uint8_t> data,
+		std::uint32_t field) {
+	try {
+		ProtoReader reader(data);
+		while (reader.next()) {
+			if (reader.field() == field
+				&& reader.wireType() == ProtoWireType::Fixed64) {
+				return reader.readDouble();
+			}
+			reader.skip();
+		}
+	} catch (const ProtoWireError &) {
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
 [[nodiscard]] std::optional<std::string> FindString(
 		std::span<const std::uint8_t> data,
 		std::uint32_t field) {
@@ -307,6 +414,46 @@ constexpr std::uint32_t kComponentSize = 3;
 	return LiveKitTrackKind::Unknown;
 }
 
+[[nodiscard]] LiveKitTrackSource TrackSourceOf(std::uint64_t source) {
+	if (source == kTrackSourceCamera) {
+		return LiveKitTrackSource::Camera;
+	} else if (source == kTrackSourceMicrophone) {
+		return LiveKitTrackSource::Microphone;
+	} else if (source == kTrackSourceScreenShare) {
+		return LiveKitTrackSource::ScreenShare;
+	} else if (source == kTrackSourceScreenShareAudio) {
+		return LiveKitTrackSource::ScreenShareAudio;
+	}
+	return LiveKitTrackSource::Unknown;
+}
+
+// The RTP stream kind of the stats is the MediaKind string, "audio" or "video".
+[[nodiscard]] LiveKitTrackKind StatsKindOf(const std::string &kind) {
+	if (kind == "audio") {
+		return LiveKitTrackKind::Audio;
+	} else if (kind == "video") {
+		return LiveKitTrackKind::Video;
+	}
+	return LiveKitTrackKind::Unknown;
+}
+
+[[nodiscard]] LiveKitLogLevel LogLevelOf(std::optional<std::uint64_t> level) {
+	if (!level) {
+		return LiveKitLogLevel::Unknown;
+	} else if (*level == 0) {
+		return LiveKitLogLevel::Error;
+	} else if (*level == 1) {
+		return LiveKitLogLevel::Warn;
+	} else if (*level == 2) {
+		return LiveKitLogLevel::Info;
+	} else if (*level == 3) {
+		return LiveKitLogLevel::Debug;
+	} else if (*level == 4) {
+		return LiveKitLogLevel::Trace;
+	}
+	return LiveKitLogLevel::Unknown;
+}
+
 // Builds the E2eeOptions message of the connect request.
 [[nodiscard]] ProtoWriter EncodeE2eeOptions(
 		const LiveKitEncryptionOptions &encryption) {
@@ -356,7 +503,8 @@ constexpr std::uint32_t kComponentSize = 3;
 }
 
 // Reads the TrackPublished of a remote participant. The publication handle is
-// owned by the adapter, the sid and the kind name the track of the publication.
+// owned by the adapter, the sid, the kind, the source and the muted state name
+// the track of the publication.
 void DecodeTrackPublished(
 		std::span<const std::uint8_t> payload,
 		LiveKitEvent &result) {
@@ -382,6 +530,9 @@ void DecodeTrackPublished(
 		}
 		const std::uint64_t kind = FindVarint(*info, kTrackInfoKind).value_or(0);
 		result.trackKind = TrackKindOf(kind);
+		const std::uint64_t source = FindVarint(*info, kTrackPublicationInfoSource).value_or(0);
+		result.trackSource = TrackSourceOf(source);
+		result.trackMuted = FindVarint(*info, kTrackPublicationInfoMuted).value_or(0) != 0;
 	}
 }
 
@@ -403,9 +554,26 @@ void DecodeTrackUnpublished(
 	}
 }
 
+// Reads a TrackMuted or a TrackUnmuted, which both name the track by its sid
+// and carry the participant identity.
+void DecodeTrackMuteEvent(
+		std::span<const std::uint8_t> payload,
+		LiveKitEventKind kind,
+		LiveKitEvent &result) {
+	result.kind = kind;
+	const std::optional<std::string> identity = FindString(payload, kTrackMuteIdentity);
+	if (identity) {
+		result.participantIdentity = *identity;
+	}
+	const std::optional<std::string> sid = FindString(payload, kTrackMuteSid);
+	if (sid) {
+		result.trackSid = *sid;
+	}
+}
+
 // Reads the RoomEvent of a room event envelope: the room handle, the track
-// subscription or unsubscription, the room drop and the E2EE state the adapter
-// needs.
+// subscription or unsubscription, the track mute state, the participant that
+// left, the room drop and the E2EE state the adapter needs.
 void DecodeRoomEvent(
 		std::span<const std::uint8_t> payload,
 		LiveKitEvent &result) {
@@ -419,8 +587,10 @@ void DecodeRoomEvent(
 		FindMessage(payload, kRoomEventDisconnected);
 	if (disconnected) {
 		result.kind = LiveKitEventKind::RoomDisconnected;
-		result.clientInitiated = FindVarint(*disconnected, kDisconnectedReason)
-			.value_or(0) == kDisconnectReasonClientInitiated;
+		const std::uint64_t reason = FindVarint(*disconnected, kDisconnectedReason)
+			.value_or(0);
+		result.disconnectReason = reason;
+		result.clientInitiated = reason == kDisconnectReasonClientInitiated;
 		return;
 	}
 	const std::optional<std::span<const std::uint8_t>> encryption =
@@ -463,6 +633,7 @@ void DecodeRoomEvent(
 				const std::uint64_t kind = FindVarint(*info, kTrackInfoKind)
 					.value_or(0);
 				result.trackKind = TrackKindOf(kind);
+				result.trackMuted = FindVarint(*info, kTrackInfoMuted).value_or(0) != 0;
 			}
 		}
 		return;
@@ -495,6 +666,30 @@ void DecodeRoomEvent(
 		FindMessage(payload, kRoomEventTrackUnpublished);
 	if (unpublished) {
 		DecodeTrackUnpublished(*unpublished, result);
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> muted =
+		FindMessage(payload, kRoomEventTrackMuted);
+	if (muted) {
+		DecodeTrackMuteEvent(*muted, LiveKitEventKind::TrackMuted, result);
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> unmuted =
+		FindMessage(payload, kRoomEventTrackUnmuted);
+	if (unmuted) {
+		DecodeTrackMuteEvent(*unmuted, LiveKitEventKind::TrackUnmuted, result);
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> participant =
+		FindMessage(payload, kRoomEventParticipantDisconnected);
+	if (participant) {
+		result.kind = LiveKitEventKind::ParticipantDisconnected;
+		const std::optional<std::string> identity = FindString(
+			*participant,
+			kParticipantDisconnectedIdentity);
+		if (identity) {
+			result.participantIdentity = *identity;
+		}
 	}
 }
 
@@ -545,6 +740,135 @@ void DecodeVideoStreamEvent(
 		buffer.components.push_back(plane);
 	}
 	result.videoBuffer = std::move(buffer);
+}
+
+// Reads one audio device of a device list.
+[[nodiscard]] LiveKitAudioDevice DecodeAudioDevice(
+		std::span<const std::uint8_t> device) {
+	LiveKitAudioDevice result;
+	result.index = static_cast<std::uint32_t>(
+		FindVarint(device, kDeviceInfoIndex).value_or(0));
+	result.name = FindString(device, kDeviceInfoName).value_or(std::string());
+	result.guid = FindString(device, kDeviceInfoGuid).value_or(std::string());
+	return result;
+}
+
+// Reads the sent counters of an outbound RTP stream.
+[[nodiscard]] LiveKitOutboundRtpStats DecodeOutboundRtp(
+		std::span<const std::uint8_t> body) {
+	LiveKitOutboundRtpStats result;
+	const std::optional<std::span<const std::uint8_t>> stream =
+		FindMessage(body, kRtpStreamField);
+	if (stream) {
+		result.kind = StatsKindOf(
+			FindString(*stream, kRtpStreamKind).value_or(std::string()));
+	}
+	const std::optional<std::span<const std::uint8_t>> sent =
+		FindMessage(body, kOutboundSentField);
+	if (sent) {
+		result.packetsSent = FindVarint(*sent, kSentPacketsSent).value_or(0);
+		result.bytesSent = FindVarint(*sent, kSentBytesSent).value_or(0);
+	}
+	return result;
+}
+
+// Reads the received counters of an inbound RTP stream. The audio fields are
+// read for audio streams and the frame count for video streams.
+[[nodiscard]] LiveKitInboundRtpStats DecodeInboundRtp(
+		std::span<const std::uint8_t> body) {
+	LiveKitInboundRtpStats result;
+	const std::optional<std::span<const std::uint8_t>> stream =
+		FindMessage(body, kRtpStreamField);
+	if (stream) {
+		result.kind = StatsKindOf(
+			FindString(*stream, kRtpStreamKind).value_or(std::string()));
+	}
+	const std::optional<std::span<const std::uint8_t>> received =
+		FindMessage(body, kInboundReceivedField);
+	if (received) {
+		result.packetsReceived = FindVarint(*received, kReceivedPacketsReceived).value_or(0);
+		result.packetsLost = static_cast<std::int64_t>(
+			FindVarint(*received, kReceivedPacketsLost).value_or(0));
+	}
+	const std::optional<std::span<const std::uint8_t>> inbound =
+		FindMessage(body, kInboundStatsField);
+	if (inbound) {
+		result.bytesReceived = FindVarint(*inbound, kInboundBytesReceived).value_or(0);
+		if (result.kind == LiveKitTrackKind::Audio) {
+			result.totalSamplesReceived = FindVarint(
+				*inbound,
+				kInboundTotalSamplesReceived).value_or(0);
+			result.audioLevel = FindDouble(*inbound, kInboundAudioLevel).value_or(0.);
+		} else if (result.kind == LiveKitTrackKind::Video) {
+			const std::optional<std::uint64_t> frames = FindVarint(
+				*inbound,
+				kInboundFramesDecoded);
+			if (frames) {
+				result.framesDecoded = static_cast<std::uint32_t>(*frames);
+			}
+		}
+	}
+	return result;
+}
+
+// Adds one RtcStats to the stats. Only the outbound and the inbound RTP members
+// are kept; every other member is skipped.
+void DecodeRtcStats(
+		std::span<const std::uint8_t> rtc,
+		LiveKitSessionStats &stats) {
+	const std::optional<std::span<const std::uint8_t>> outbound =
+		FindMessage(rtc, kRtcStatsOutboundRtp);
+	if (outbound) {
+		stats.outbound.push_back(DecodeOutboundRtp(*outbound));
+		return;
+	}
+	const std::optional<std::span<const std::uint8_t>> inbound =
+		FindMessage(rtc, kRtcStatsInboundRtp);
+	if (inbound) {
+		stats.inbound.push_back(DecodeInboundRtp(*inbound));
+	}
+}
+
+// Reads a GetSessionStatsCallback. An error, or a callback with no result, gives
+// stats with the error flag and no text of the library.
+void DecodeSessionStatsCallback(
+		std::span<const std::uint8_t> payload,
+		LiveKitEvent &result) {
+	result.kind = LiveKitEventKind::SessionStats;
+	result.asyncId = FindVarint(payload, kStatsCallbackAsyncId).value_or(0);
+	LiveKitSessionStats stats;
+	const std::optional<std::span<const std::uint8_t>> callbackResult =
+		FindMessage(payload, kStatsCallbackResult);
+	if (FindString(payload, kStatsCallbackError)) {
+		stats.error = true;
+	} else if (callbackResult) {
+		for (const std::span<const std::uint8_t> rtc
+				: FindMessages(*callbackResult, kStatsResultPublisher)) {
+			DecodeRtcStats(rtc, stats);
+		}
+		for (const std::span<const std::uint8_t> rtc
+				: FindMessages(*callbackResult, kStatsResultSubscriber)) {
+			DecodeRtcStats(rtc, stats);
+		}
+	} else {
+		stats.error = true;
+	}
+	result.sessionStats = std::move(stats);
+}
+
+// Reads the records of a LogBatch.
+[[nodiscard]] std::vector<LiveKitLogRecord> DecodeLogBatch(
+		std::span<const std::uint8_t> payload) {
+	std::vector<LiveKitLogRecord> result;
+	for (const std::span<const std::uint8_t> record
+			: FindMessages(payload, kLogBatchRecords)) {
+		LiveKitLogRecord log;
+		log.level = LogLevelOf(FindVarint(record, kLogRecordLevel));
+		log.target = FindString(record, kLogRecordTarget).value_or(std::string());
+		log.message = FindString(record, kLogRecordMessage).value_or(std::string());
+		result.push_back(std::move(log));
+	}
+	return result;
 }
 
 } // namespace
@@ -600,6 +924,17 @@ std::vector<std::uint8_t> EncodeLiveKitDisconnectRequest(
 	return WrapFfiRequest(kFfiRequestDisconnect, disconnect);
 }
 
+std::vector<std::uint8_t> EncodeLiveKitGetSessionStatsRequest(
+		std::uint64_t roomHandle,
+		std::optional<std::uint64_t> requestAsyncId) {
+	ProtoWriter stats;
+	stats.writeVarintField(kSessionStatsRoomHandle, roomHandle);
+	if (requestAsyncId) {
+		stats.writeVarintField(kSessionStatsRequestAsyncId, *requestAsyncId);
+	}
+	return WrapFfiRequest(kFfiRequestGetSessionStats, stats);
+}
+
 std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioRequest() {
 	const ProtoWriter empty;
 	return WrapFfiRequest(kFfiRequestNewPlatformAudio, empty);
@@ -626,6 +961,31 @@ std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioSourceRequest(
 		kNewAudioSourcePlatformAudioHandle,
 		platformAudioHandle);
 	return WrapFfiRequest(kFfiRequestNewAudioSource, source);
+}
+
+std::vector<std::uint8_t> EncodeLiveKitGetAudioDevicesRequest(
+		std::uint64_t platformAudioHandle) {
+	ProtoWriter devices;
+	devices.writeVarintField(kDeviceRequestHandle, platformAudioHandle);
+	return WrapFfiRequest(kFfiRequestGetAudioDevices, devices);
+}
+
+std::vector<std::uint8_t> EncodeLiveKitSetRecordingDeviceRequest(
+		std::uint64_t platformAudioHandle,
+		const std::string &deviceId) {
+	ProtoWriter device;
+	device.writeVarintField(kDeviceRequestHandle, platformAudioHandle);
+	device.writeStringField(kDeviceRequestDeviceId, deviceId);
+	return WrapFfiRequest(kFfiRequestSetRecordingDevice, device);
+}
+
+std::vector<std::uint8_t> EncodeLiveKitSetPlayoutDeviceRequest(
+		std::uint64_t platformAudioHandle,
+		const std::string &deviceId) {
+	ProtoWriter device;
+	device.writeVarintField(kDeviceRequestHandle, platformAudioHandle);
+	device.writeStringField(kDeviceRequestDeviceId, deviceId);
+	return WrapFfiRequest(kFfiRequestSetPlayoutDevice, device);
 }
 
 std::vector<std::uint8_t> EncodeLiveKitCreateAudioTrackRequest(
@@ -802,6 +1162,87 @@ LiveKitHandleResponse DecodeLiveKitHandleResponse(
 	return result;
 }
 
+std::optional<LiveKitPlatformAudioInfo> DecodePlatformAudioInfo(
+		const std::vector<std::uint8_t> &response) {
+	const std::optional<std::span<const std::uint8_t>> message =
+		FindMessage(response, kFfiResponseNewPlatformAudio);
+	if (!message) {
+		return std::nullopt;
+	}
+	const std::optional<std::span<const std::uint8_t>> owned =
+		FindMessage(*message, kPlatformAudioOwned);
+	if (!owned) {
+		return std::nullopt;
+	}
+	const std::optional<std::span<const std::uint8_t>> info =
+		FindMessage(*owned, kOwnedPlatformAudioInfo);
+	if (!info) {
+		return std::nullopt;
+	}
+	LiveKitPlatformAudioInfo result;
+	result.recordingDeviceCount = static_cast<std::int32_t>(
+		FindVarint(*info, kPlatformAudioRecordingCount).value_or(0));
+	result.playoutDeviceCount = static_cast<std::int32_t>(
+		FindVarint(*info, kPlatformAudioPlayoutCount).value_or(0));
+	return result;
+}
+
+std::optional<LiveKitAudioDeviceList> DecodeLiveKitAudioDevices(
+		const std::vector<std::uint8_t> &response) {
+	const std::optional<std::span<const std::uint8_t>> message =
+		FindMessage(response, kFfiResponseGetAudioDevices);
+	if (!message) {
+		return std::nullopt;
+	}
+	LiveKitAudioDeviceList result;
+	for (const std::span<const std::uint8_t> device
+			: FindMessages(*message, kDevicesPlaybackList)) {
+		result.playout.push_back(DecodeAudioDevice(device));
+	}
+	for (const std::span<const std::uint8_t> device
+			: FindMessages(*message, kDevicesRecordingList)) {
+		result.recording.push_back(DecodeAudioDevice(device));
+	}
+	result.error = FindString(*message, kDevicesError).value_or(std::string());
+	return result;
+}
+
+std::optional<std::string> DecodeLiveKitSetDeviceResponse(
+		const std::vector<std::uint8_t> &response,
+		std::uint32_t responseField) {
+	const std::optional<std::span<const std::uint8_t>> message =
+		FindMessage(response, responseField);
+	if (!message) {
+		return std::nullopt;
+	}
+	return FindString(*message, kSetDeviceError).value_or(std::string());
+}
+
+std::optional<std::string> FormatLiveKitLogLine(const LiveKitLogRecord &record) {
+	const LiveKitLogLevel level = record.level;
+	if (level == LiveKitLogLevel::Unknown) {
+		return std::nullopt;
+	}
+	// Error and Warn are kept for every target. Info is kept for the livekit
+	// targets only, and Debug and Trace are dropped.
+	const bool severe = level == LiveKitLogLevel::Error
+		|| level == LiveKitLogLevel::Warn;
+	const bool livekitInfo = record.target.starts_with("livekit")
+		&& level == LiveKitLogLevel::Info;
+	if (!severe && !livekitInfo) {
+		return std::nullopt;
+	}
+	// The message is never written. SDK text can carry URLs, tokens, key bytes
+	// and addresses, and no pattern covers all of them.
+	const char *levelName = "info";
+	if (level == LiveKitLogLevel::Error) {
+		levelName = "error";
+	} else if (level == LiveKitLogLevel::Warn) {
+		levelName = "warn";
+	}
+	return record.target + ": " + levelName;
+}
+
 LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 	LiveKitEvent result;
 	try {
@@ -812,7 +1253,9 @@ LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 				|| field == kEventVideoStream
 				|| field == kEventConnect
 				|| field == kEventDisconnect
-				|| field == kEventPublishTrack;
+				|| field == kEventPublishTrack
+				|| field == kEventLogs
+				|| field == kEventSessionStats;
 			if (!used
 				|| reader.wireType() != ProtoWireType::LengthDelimited) {
 				reader.skip();
@@ -824,6 +1267,13 @@ LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 				return result;
 			} else if (field == kEventVideoStream) {
 				DecodeVideoStreamEvent(payload, result);
+				return result;
+			} else if (field == kEventLogs) {
+				result.kind = LiveKitEventKind::Log;
+				result.logRecords = DecodeLogBatch(payload);
+				return result;
+			} else if (field == kEventSessionStats) {
+				DecodeSessionStatsCallback(payload, result);
 				return result;
 			}
 			if (const std::optional<std::uint64_t> asyncId = FindVarint(payload, kAsyncId)) {

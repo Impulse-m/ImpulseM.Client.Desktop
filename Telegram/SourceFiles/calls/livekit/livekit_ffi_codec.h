@@ -16,10 +16,15 @@ struct LiveKitRoomOptions final {
 	bool dynacast = false;
 };
 
+// The TrackSource of a track (livekit-ffi track protocol). The publish request
+// writes the values 1 to 3 as the source of the publish options. Unknown holds
+// every value the library does not define.
 enum class LiveKitTrackSource : std::uint8_t {
+	Unknown = 0,
 	Camera = 1,
 	Microphone = 2,
 	ScreenShare = 3,
+	ScreenShareAudio = 4,
 };
 
 // The VideoQuality of a remote video publication (livekit-ffi room protocol).
@@ -54,6 +59,11 @@ enum class LiveKitEventKind : std::uint8_t {
 	EncryptionStateChanged,
 	TrackPublished,
 	TrackUnpublished,
+	TrackMuted,
+	TrackUnmuted,
+	ParticipantDisconnected,
+	SessionStats,
+	Log,
 };
 
 // The EncryptionState of an E2EE state change (livekit-ffi e2ee.proto). Unknown
@@ -67,6 +77,78 @@ enum class LiveKitEncryptionState : std::uint8_t {
 	MissingKey,
 	KeyRatcheted,
 	InternalError,
+};
+
+// The LogLevel of a library log record (livekit-ffi ffi.proto). The values are
+// in the order of the protocol, from the most severe. Unknown holds every value
+// the library does not define.
+enum class LiveKitLogLevel : std::uint8_t {
+	Error,
+	Warn,
+	Info,
+	Debug,
+	Trace,
+	Unknown,
+};
+
+// One record of the library log, as a LogBatch of the library carries it. The
+// module path, the file and the line are not kept. The message is decoded for
+// the router sinks, but FormatLiveKitLogLine never writes it.
+struct LiveKitLogRecord final {
+	LiveKitLogLevel level = LiveKitLogLevel::Unknown;
+	std::string target;
+	std::string message;
+};
+
+// One audio device of the platform audio, as the library lists it. The guid is
+// the id the device is selected with; it is empty on mobile.
+struct LiveKitAudioDevice final {
+	std::uint32_t index = 0;
+	std::string name;
+	std::string guid;
+};
+
+// The devices of the platform audio. The error is empty when the listing
+// succeeded.
+struct LiveKitAudioDeviceList final {
+	std::vector<LiveKitAudioDevice> playout;
+	std::vector<LiveKitAudioDevice> recording;
+	std::string error;
+};
+
+// The device counts that the library reports when the platform audio is created.
+struct LiveKitPlatformAudioInfo final {
+	std::int32_t recordingDeviceCount = 0;
+	std::int32_t playoutDeviceCount = 0;
+};
+
+// An outbound RTP stream of the session, from the publisher stats.
+struct LiveKitOutboundRtpStats final {
+	LiveKitTrackKind kind = LiveKitTrackKind::Unknown;
+	std::uint64_t packetsSent = 0;
+	std::uint64_t bytesSent = 0;
+};
+
+// An inbound RTP stream of the session, from the subscriber stats. The audio
+// fields are filled for audio streams only, and framesDecoded for video streams
+// only.
+struct LiveKitInboundRtpStats final {
+	LiveKitTrackKind kind = LiveKitTrackKind::Unknown;
+	std::uint64_t packetsReceived = 0;
+	std::uint64_t bytesReceived = 0;
+	std::int64_t packetsLost = 0;
+	std::uint64_t totalSamplesReceived = 0;
+	double audioLevel = 0.;
+	std::optional<std::uint32_t> framesDecoded;
+};
+
+// The RTP stats of the session of a room. The error is set when the library
+// failed the stats request; the lists are then empty and no text of the library
+// is kept.
+struct LiveKitSessionStats final {
+	bool error = false;
+	std::vector<LiveKitOutboundRtpStats> outbound;
+	std::vector<LiveKitInboundRtpStats> inbound;
 };
 
 // One plane of an I420 buffer that the library decoded for a video frame. The
@@ -99,9 +181,9 @@ struct LiveKitVideoBuffer final {
 };
 
 // The decoded part of an FfiEvent that the adapter needs: the async callbacks
-// of connect, publish and disconnect requests, the track subscriptions of the
-// room, the room drop and E2EE state of the room, and the frames of a video
-// stream.
+// of connect, publish, disconnect and session stats requests, the track
+// subscriptions and publications of the room, the room drop and E2EE state of
+// the room, the frames of a video stream, and the records of the library log.
 struct LiveKitEvent final {
 	LiveKitEventKind kind = LiveKitEventKind::Unknown;
 	std::uint64_t asyncId = 0;
@@ -110,13 +192,18 @@ struct LiveKitEvent final {
 	std::optional<std::uint64_t> localParticipantHandle;
 
 	// TrackPublished of a remote participant. The handle is set on a publish
-	// only and is owned by the adapter; the sid and the kind come from the
-	// publication info. TrackUnpublished names the publication by trackSid.
+	// only and is owned by the adapter; the sid, the kind, the source and the
+	// muted state come from the publication info. TrackUnpublished names the
+	// publication by trackSid.
 	std::optional<std::uint64_t> publicationHandle;
+	LiveKitTrackSource trackSource = LiveKitTrackSource::Unknown;
+	bool trackMuted = false;
 
 	// TrackSubscribed and TrackUnsubscribed. The handle is set on a subscribe
-	// only; the sid identifies the track on both events. EncryptionStateChanged
-	// names the participant whose state changed in participantIdentity.
+	// only; the sid identifies the track on both events. TrackMuted and
+	// TrackUnmuted name the track by its sid. EncryptionStateChanged names the
+	// participant whose state changed in participantIdentity, and so does
+	// ParticipantDisconnected.
 	std::string participantIdentity;
 	std::string trackSid;
 	std::optional<std::uint64_t> trackHandle;
@@ -124,7 +211,9 @@ struct LiveKitEvent final {
 
 	// RoomDisconnected: true when this client left the room, which is the
 	// disconnect the adapter asked for. Any other reason is a server-side drop.
+	// The reason is the DisconnectReason code of the library.
 	bool clientInitiated = false;
+	std::uint64_t disconnectReason = 0;
 
 	// EncryptionStateChanged: the state the library reports for the track.
 	LiveKitEncryptionState encryptionState = LiveKitEncryptionState::Unknown;
@@ -132,6 +221,12 @@ struct LiveKitEvent final {
 	// VideoFrame: the video stream that delivered the frame and its buffer.
 	std::optional<std::uint64_t> streamHandle;
 	std::optional<LiveKitVideoBuffer> videoBuffer;
+
+	// Log: the records of one LogBatch.
+	std::vector<LiveKitLogRecord> logRecords;
+
+	// SessionStats: the stats of the callback, routed by asyncId.
+	std::optional<LiveKitSessionStats> sessionStats;
 };
 
 // A synchronous response that creates one owned handle (PlatformAudio, audio
@@ -157,6 +252,12 @@ struct LiveKitHandleResponse final {
 	std::uint64_t roomHandle,
 	std::optional<std::uint64_t> requestAsyncId);
 
+// Requests the RTP stats of the session of a room. The callback arrives as a
+// SessionStats event with the same async id.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitGetSessionStatsRequest(
+	std::uint64_t roomHandle,
+	std::optional<std::uint64_t> requestAsyncId);
+
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioRequest();
 
 // The audio processing of the platform audio is set with the source: echo
@@ -164,6 +265,21 @@ struct LiveKitHandleResponse final {
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitNewPlatformAudioSourceRequest(
 	std::uint64_t platformAudioHandle,
 	bool noiseSuppression);
+
+// Lists the playout and recording devices of a platform audio. The request is
+// synchronous.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitGetAudioDevicesRequest(
+	std::uint64_t platformAudioHandle);
+
+// Selects the recording or the playout device by its guid, as listed by
+// EncodeLiveKitGetAudioDevicesRequest. The requests are synchronous.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitSetRecordingDeviceRequest(
+	std::uint64_t platformAudioHandle,
+	const std::string &deviceId);
+
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitSetPlayoutDeviceRequest(
+	std::uint64_t platformAudioHandle,
+	const std::string &deviceId);
 
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitCreateAudioTrackRequest(
 	const std::string &name,
@@ -229,8 +345,8 @@ struct LiveKitHandleResponse final {
 	const std::vector<std::uint8_t> &response);
 
 // Reads the async id of a response that carries one (ConnectResponse,
-// PublishTrackResponse or DisconnectResponse) from the FfiResponse field
-// responseField.
+// PublishTrackResponse, DisconnectResponse or GetSessionStatsResponse) from the
+// FfiResponse field responseField.
 [[nodiscard]] std::optional<std::uint64_t> DecodeLiveKitAsyncId(
 	const std::vector<std::uint8_t> &response,
 	std::uint32_t responseField);
@@ -241,6 +357,33 @@ struct LiveKitHandleResponse final {
 [[nodiscard]] LiveKitHandleResponse DecodeLiveKitHandleResponse(
 	const std::vector<std::uint8_t> &response,
 	std::uint32_t responseField);
+
+// Reads the device counts of the PlatformAudioInfo of a NewPlatformAudioResponse.
+// Returns nullopt when the response carries no info.
+[[nodiscard]] std::optional<LiveKitPlatformAudioInfo> DecodePlatformAudioInfo(
+	const std::vector<std::uint8_t> &response);
+
+// Reads the device lists of a GetAudioDevicesResponse. Returns nullopt when the
+// response carries no GetAudioDevicesResponse.
+[[nodiscard]] std::optional<LiveKitAudioDeviceList> DecodeLiveKitAudioDevices(
+	const std::vector<std::uint8_t> &response);
+
+// Reads the error of a SetRecordingDeviceResponse or a SetPlayoutDeviceResponse
+// from the FfiResponse field responseField. Returns nullopt when the response
+// carries no such message, and the error text otherwise, which is empty on
+// success.
+[[nodiscard]] std::optional<std::string> DecodeLiveKitSetDeviceResponse(
+	const std::vector<std::uint8_t> &response,
+	std::uint32_t responseField);
+
+// Turns a library log record into a line that is safe to write. The line is
+// "<target>: <level>", for example "livekit_room: info", and the message text of
+// the record is never part of it: SDK text can carry the authenticated URL, the
+// token, key bytes and addresses, and no redaction covers all of them. Records
+// of a target that starts with livekit are kept at Info and above, and records
+// of any other target at Warn and above; the rest give nullopt.
+[[nodiscard]] std::optional<std::string> FormatLiveKitLogLine(
+	const LiveKitLogRecord &record);
 
 // Decodes one encoded FfiEvent. Returns a LiveKitEvent of kind Unknown for any
 // event the adapter does not use.

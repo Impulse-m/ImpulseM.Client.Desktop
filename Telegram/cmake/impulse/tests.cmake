@@ -31,6 +31,9 @@ PRIVATE
     # headers.
     calls/livekit/livekit_event_router.cpp
     calls/livekit/livekit_adapter.cpp
+    # Std-only logic of the 1:1 LiveKit call: remote media state, remote video
+    # choice, stats summary and debug JSON, tested with plain inputs.
+    calls/livekit/livekit_call_logic.cpp
     # Account lane bookkeeping of the realtime path, std only: tested with
     # recording lane actions. The rest of the glue links the Rust client.
     mtproto/impulse/glue/lanes_observer.cpp

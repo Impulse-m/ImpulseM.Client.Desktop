@@ -4,6 +4,9 @@
 
 #include "base/platform/win/base_windows_safe_library.h"
 #include "calls/livekit/livekit_ffi_codec.h"
+#include "logs.h"
+
+#include <QtCore/QString>
 
 #include <atomic>
 #include <cstddef>
@@ -39,6 +42,17 @@ void ReleaseUntakenHandle(std::uint64_t handle) {
 LiveKitEventRouter &ProcessEventRouter() {
 	static LiveKitEventRouter router(&ReleaseUntakenHandle);
 	return router;
+}
+
+// Writes one library log record to the client log. FormatLiveKitLogLine keeps
+// the target and the level only, and drops the record when it is not written; a
+// dropped record writes nothing. The library thread calls it.
+void WriteLibraryLog(const LiveKitLogRecord &record) {
+	const std::optional<std::string> line = FormatLiveKitLogLine(record);
+	if (!line) {
+		return;
+	}
+	LOG(("LiveKit FFI: %1").arg(QString::fromStdString(*line)));
 }
 
 extern "C" void LiveKitFfiEventCallback(
@@ -132,7 +146,13 @@ std::shared_ptr<LiveKitFfiLoader> LiveKitFfiLoader::Process(
 		std::shared_ptr<LiveKitFfiLoader> created =
 			std::make_shared<LiveKitFfiLoader>(dllPath);
 		if (created->loaded()) {
-			created->initialize(false, kSdkName, kSdkVersion);
+			// The sink is set before the library starts, so the first records
+			// of the library are written too. The library has no level filter
+			// for its capture, so every record crosses the event callback and is
+			// decoded, Debug and Trace included, and only then dropped by
+			// FormatLiveKitLogLine. The cost is not measured on a live call.
+			ProcessEventRouter().setLogSink(&WriteLibraryLog);
+			created->initialize(true, kSdkName, kSdkVersion);
 		}
 		return created;
 	}();

@@ -2,10 +2,11 @@
 // library, connects the room with the E2EE shared key, publishes the microphone
 // (through PlatformAudio), a camera track and a screen share, subscribes to the
 // remote tracks, mutes the tracks, sets the video quality of the remote
-// participants, and disconnects. Remote audio plays through PlatformAudio, which
-// is created when the room connects. Remote video frames go to a sink. Library
-// events reach the adapter through the event router of the library, so two
-// adapters on one library each get only the events of their own room.
+// participants, selects the audio devices, requests the session stats, and
+// disconnects. Remote audio plays through PlatformAudio, which is created when
+// the room connects. Remote video frames go to a sink. Library events reach the
+// adapter through the event router of the library, so two adapters on one
+// library each get only the events of their own room.
 // The remote audio volume is not set here: the pinned protocol has no request
 // for it.
 //
@@ -45,6 +46,7 @@ public:
 
 	void setSharedKey(std::vector<std::uint8_t> key) override;
 	void setVideoSink(LiveKitVideoSink *sink) override;
+	void setShownVideoTrack(const std::string &trackSid) override;
 	bool connect(const std::string &url, const std::string &token) override;
 	bool publishMicrophone() override;
 	bool publishCamera(std::uint32_t width, std::uint32_t height) override;
@@ -54,10 +56,14 @@ public:
 		const LiveKitCapturedFrame &frame) override;
 	bool setMicrophoneMuted(bool muted) override;
 	bool setCameraEnabled(bool enabled) override;
+	bool setScreenShareEnabled(bool enabled) override;
 	bool setNoiseSuppression(bool enabled) override;
+	bool setPlayoutDevice(const std::string &deviceId) override;
+	bool setRecordingDevice(const std::string &deviceId) override;
 	bool setRemoteVideoQuality(
 		const std::string &participantIdentity,
 		LiveKitVideoQuality quality) override;
+	bool requestSessionStats() override;
 	void disconnect() override;
 	[[nodiscard]] bool connected() const override;
 

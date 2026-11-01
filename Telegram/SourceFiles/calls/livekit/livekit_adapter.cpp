@@ -5,10 +5,12 @@
 #include "calls/livekit/livekit_ffi_loader.h"
 
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,12 +41,15 @@ namespace {
 constexpr std::uint32_t kResponseConnect = 3;
 constexpr std::uint32_t kResponseDisconnect = 4;
 constexpr std::uint32_t kResponsePublishTrack = 5;
+constexpr std::uint32_t kResponseGetSessionStats = 12;
 constexpr std::uint32_t kResponseCreateVideoTrack = 15;
 constexpr std::uint32_t kResponseCreateAudioTrack = 16;
 constexpr std::uint32_t kResponseNewVideoStream = 20;
 constexpr std::uint32_t kResponseNewVideoSource = 21;
 constexpr std::uint32_t kResponseNewAudioSource = 26;
 constexpr std::uint32_t kResponseNewPlatformAudio = 76;
+constexpr std::uint32_t kResponseSetRecordingDevice = 78;
+constexpr std::uint32_t kResponseSetPlayoutDevice = 79;
 
 constexpr const char *kMicrophoneName = "microphone";
 constexpr const char *kCameraName = "camera";
@@ -115,6 +120,82 @@ enum class Phase : std::uint8_t {
 		|| state == LiveKitEncryptionState::InternalError;
 }
 
+// The names that the diagnostic lines use. They carry no SDK text.
+[[nodiscard]] const char *PublishKindName(LiveKitPublishKind kind) {
+	if (kind == LiveKitPublishKind::Microphone) {
+		return "microphone";
+	} else if (kind == LiveKitPublishKind::Camera) {
+		return "camera";
+	}
+	return "screen share";
+}
+
+[[nodiscard]] const char *KindName(LiveKitTrackKind kind) {
+	if (kind == LiveKitTrackKind::Audio) {
+		return "audio";
+	} else if (kind == LiveKitTrackKind::Video) {
+		return "video";
+	}
+	return "unknown";
+}
+
+[[nodiscard]] const char *SourceName(LiveKitTrackSource source) {
+	if (source == LiveKitTrackSource::Camera) {
+		return "camera";
+	} else if (source == LiveKitTrackSource::Microphone) {
+		return "microphone";
+	} else if (source == LiveKitTrackSource::ScreenShare) {
+		return "screen share";
+	} else if (source == LiveKitTrackSource::ScreenShareAudio) {
+		return "screen share audio";
+	}
+	return "unknown";
+}
+
+[[nodiscard]] const char *EncryptionStateName(LiveKitEncryptionState state) {
+	if (state == LiveKitEncryptionState::New) {
+		return "new";
+	} else if (state == LiveKitEncryptionState::Ok) {
+		return "ok";
+	} else if (state == LiveKitEncryptionState::EncryptionFailed) {
+		return "encryption failed";
+	} else if (state == LiveKitEncryptionState::DecryptionFailed) {
+		return "decryption failed";
+	} else if (state == LiveKitEncryptionState::MissingKey) {
+		return "missing key";
+	} else if (state == LiveKitEncryptionState::KeyRatcheted) {
+		return "key ratcheted";
+	} else if (state == LiveKitEncryptionState::InternalError) {
+		return "internal error";
+	}
+	return "unknown";
+}
+
+// The endpoint ids of the platform audio are compared without the case.
+[[nodiscard]] bool EqualsIgnoreCase(
+		const std::string &left,
+		const std::string &right) {
+	if (left.size() != right.size()) {
+		return false;
+	}
+	for (std::size_t index = 0; index < left.size(); ++index) {
+		const int leftSymbol = std::tolower(static_cast<unsigned char>(left[index]));
+		const int rightSymbol = std::tolower(static_cast<unsigned char>(right[index]));
+		if (leftSymbol != rightSymbol) {
+			return false;
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] std::string DescribeMedia(const LiveKitRemoteMedia &media) {
+	return media.participantIdentity
+		+ ", "
+		+ KindName(media.kind)
+		+ ", "
+		+ SourceName(media.source);
+}
+
 void DropHandle(
 		LiveKitFfi &library,
 		std::optional<std::uint64_t> &handle) {
@@ -133,6 +214,10 @@ void AddKey(LiveKitAdapterShared &state, std::uint64_t key);
 
 void RemoveKey(LiveKitAdapterShared &state, std::uint64_t key);
 
+void SendLog(LiveKitAdapterShared &state, const std::string &line);
+
+void NotifyRemoteMedia(LiveKitAdapterShared &state);
+
 void ReleaseAll(LiveKitAdapterShared &state);
 
 void ReleaseRemoteTrack(
@@ -146,6 +231,17 @@ void FailWith(LiveKitAdapterShared &state, const char *message);
 void FinishDisconnected(LiveKitAdapterShared &state);
 
 void SendDisconnect(LiveKitAdapterShared &state);
+
+bool CreatePlatformAudio(LiveKitAdapterShared &state);
+
+bool ApplyAudioDevice(
+		LiveKitAdapterShared &state,
+		const std::string &deviceId,
+		bool playout);
+
+void ApplyStoredAudioDevices(LiveKitAdapterShared &state);
+
+void RefreshShownStream(LiveKitAdapterShared &state);
 
 bool StartSession(LiveKitAdapterShared &state);
 
@@ -163,6 +259,10 @@ bool SetTrackMuted(
 std::optional<LiveKitVideoFrame> CopyVideoFrame(
 		LiveKitFfi &library,
 		const LiveKitVideoBuffer &buffer);
+
+bool IsShownStream(
+		const LiveKitAdapterShared &state,
+		std::uint64_t streamHandle);
 
 void RouteVideoFrame(
 		const std::shared_ptr<LiveKitAdapterShared> &owner,
@@ -196,6 +296,19 @@ void DispatchTrackUnpublished(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event);
 
+void DispatchTrackMute(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event,
+		bool muted);
+
+void DispatchParticipantDisconnected(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event);
+
+void DispatchSessionStats(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event);
+
 bool RequestRemoteQuality(
 		LiveKitAdapterShared &state,
 		std::uint64_t publicationHandle,
@@ -223,14 +336,30 @@ struct LiveKitAdapterShared final {
 	bool screenRequested = false;
 	bool microphoneMuted = true;
 	bool cameraEnabled = true;
+	bool screenShareEnabled = true;
 	bool noiseSuppression = true;
 	std::vector<std::uint8_t> sharedKey;
+	std::string playoutDeviceId;
+	std::string recordingDeviceId;
+	// A device is selected when a non-empty id was applied, so an empty id after
+	// a selection can switch back to the default device.
+	bool playoutDeviceSelected = false;
+	bool recordingDeviceSelected = false;
 	LiveKitVideoSink *videoSink = nullptr;
+	// The shown track of the video frames. The owner thread sets the sid, and the
+	// stream handle of its stream is published to the library thread, which
+	// drops the frames of any other stream before they are copied.
+	bool shownFilterSet = false;
+	std::string shownTrackSid;
+	std::atomic<bool> videoFilterOn{false};
+	std::atomic<std::uint64_t> shownStreamHandle{0};
 	std::optional<std::uint64_t> connectAsyncId;
 	std::optional<std::uint64_t> disconnectAsyncId;
 	std::map<std::uint64_t, LiveKitPublishKind> publishAsyncIds;
+	std::set<std::uint64_t> statsAsyncIds;
 	std::map<std::string, LiveKitRemoteTrack> remoteTracks;
 	std::map<std::string, LiveKitRemotePublication> remotePublications;
+	std::map<std::string, LiveKitRemoteMedia> remoteMedia;
 	std::map<std::string, LiveKitVideoQuality> videoQualities;
 	std::optional<std::uint64_t> roomHandle;
 	std::optional<std::uint64_t> localParticipantHandle;
@@ -301,6 +430,13 @@ void LiveKitAdapter::setVideoSink(LiveKitVideoSink *sink) {
 	shared->videoSink = sink;
 }
 
+void LiveKitAdapter::setShownVideoTrack(const std::string &trackSid) {
+	LiveKitAdapterShared &state = *shared;
+	state.shownFilterSet = true;
+	state.shownTrackSid = trackSid;
+	RefreshShownStream(state);
+}
+
 bool LiveKitAdapter::connect(const std::string &url, const std::string &token) {
 	LiveKitAdapterShared &state = *shared;
 	if (state.phase != Phase::Idle) {
@@ -316,9 +452,10 @@ bool LiveKitAdapter::connect(const std::string &url, const std::string &token) {
 		options.sharedKey = state.sharedKey;
 		encryption = std::move(options);
 	}
+	SendLog(state, "connect requested");
 	const std::uint64_t asyncId = NextRequestAsyncId();
 	AddKey(state, asyncId);
-	const std::optional<std::vector<std::uint8_t>> response = ffi->request(
+	const std::optional<std::vector<std::uint8_t>> response = state.library->request(
 		EncodeLiveKitConnectRequest(
 			url,
 			token,
@@ -343,13 +480,7 @@ bool LiveKitAdapter::publishMicrophone() {
 
 	// PlatformAudio is created when the room connects, so this reuses it. It is
 	// created here only when the connect step did not leave one.
-	if (!state.platformAudioHandle) {
-		state.platformAudioHandle = RequestHandle(
-			state,
-			EncodeLiveKitNewPlatformAudioRequest(),
-			kResponseNewPlatformAudio);
-	}
-	if (!state.platformAudioHandle) {
+	if (!state.platformAudioHandle && !CreatePlatformAudio(state)) {
 		FailWith(state, kPublishFailed);
 		return false;
 	}
@@ -451,6 +582,12 @@ bool LiveKitAdapter::publishScreenShare(
 		FailWith(state, kPublishFailed);
 		return false;
 	}
+	// A track starts enabled, so only a screen share that was disabled before
+	// the publish is muted before it is published.
+	if (!state.screenShareEnabled
+		&& !SetTrackMuted(state, *state.screenTrackHandle, true)) {
+		return false;
+	}
 	return PublishTrack(
 		state,
 		*state.screenTrackHandle,
@@ -498,6 +635,9 @@ bool LiveKitAdapter::captureVideoFrame(
 
 bool LiveKitAdapter::setMicrophoneMuted(bool muted) {
 	LiveKitAdapterShared &state = *shared;
+	if (state.microphoneMuted != muted) {
+		SendLog(state, muted ? "local mute: microphone muted" : "local mute: microphone unmuted");
+	}
 	state.microphoneMuted = muted;
 	if (!state.audioTrackHandle) {
 		// Applied when the track is created and published.
@@ -508,12 +648,28 @@ bool LiveKitAdapter::setMicrophoneMuted(bool muted) {
 
 bool LiveKitAdapter::setCameraEnabled(bool enabled) {
 	LiveKitAdapterShared &state = *shared;
+	if (state.cameraEnabled != enabled) {
+		SendLog(state, enabled ? "local mute: camera unmuted" : "local mute: camera muted");
+	}
 	state.cameraEnabled = enabled;
 	if (!state.videoTrackHandle) {
 		// Applied when the camera track is published.
 		return true;
 	}
 	return SetTrackMuted(state, *state.videoTrackHandle, !enabled);
+}
+
+bool LiveKitAdapter::setScreenShareEnabled(bool enabled) {
+	LiveKitAdapterShared &state = *shared;
+	if (state.screenShareEnabled != enabled) {
+		SendLog(state, enabled ? "local mute: screen share unmuted" : "local mute: screen share muted");
+	}
+	state.screenShareEnabled = enabled;
+	if (!state.screenTrackHandle) {
+		// Applied when the screen share track is published.
+		return true;
+	}
+	return SetTrackMuted(state, *state.screenTrackHandle, !enabled);
 }
 
 bool LiveKitAdapter::setNoiseSuppression(bool enabled) {
@@ -525,6 +681,26 @@ bool LiveKitAdapter::setNoiseSuppression(bool enabled) {
 		|| state.noiseSuppression == enabled;
 	state.noiseSuppression = enabled;
 	return applied;
+}
+
+bool LiveKitAdapter::setPlayoutDevice(const std::string &deviceId) {
+	LiveKitAdapterShared &state = *shared;
+	state.playoutDeviceId = deviceId;
+	if (!state.platformAudioHandle) {
+		// Applied when PlatformAudio is created.
+		return true;
+	}
+	return ApplyAudioDevice(state, deviceId, true);
+}
+
+bool LiveKitAdapter::setRecordingDevice(const std::string &deviceId) {
+	LiveKitAdapterShared &state = *shared;
+	state.recordingDeviceId = deviceId;
+	if (!state.platformAudioHandle) {
+		// Applied when PlatformAudio is created.
+		return true;
+	}
+	return ApplyAudioDevice(state, deviceId, false);
 }
 
 bool LiveKitAdapter::setRemoteVideoQuality(
@@ -550,6 +726,23 @@ bool LiveKitAdapter::setRemoteVideoQuality(
 			quality) && confirmed;
 	}
 	return confirmed;
+}
+
+bool LiveKitAdapter::requestSessionStats() {
+	LiveKitAdapterShared &state = *shared;
+	if (state.phase != Phase::Connected || !state.roomHandle) {
+		return false;
+	}
+	const std::uint64_t asyncId = NextRequestAsyncId();
+	AddKey(state, asyncId);
+	const std::optional<std::vector<std::uint8_t>> response = state.library->request(
+		EncodeLiveKitGetSessionStatsRequest(*state.roomHandle, asyncId));
+	if (!RequestAccepted(response, kResponseGetSessionStats, asyncId)) {
+		RemoveKey(state, asyncId);
+		return false;
+	}
+	state.statsAsyncIds.insert(asyncId);
+	return true;
 }
 
 void LiveKitAdapter::disconnect() {
@@ -600,6 +793,27 @@ void RemoveKey(LiveKitAdapterShared &state, std::uint64_t key) {
 	}
 }
 
+// Passes one diagnostic line to the delegate, on the owner thread.
+void SendLog(LiveKitAdapterShared &state, const std::string &line) {
+	if (state.delegate) {
+		state.delegate->liveKitLog(line);
+	}
+}
+
+// Hands the full snapshot of the remote tracks to the delegate.
+void NotifyRemoteMedia(LiveKitAdapterShared &state) {
+	if (!state.delegate) {
+		return;
+	}
+	std::vector<LiveKitRemoteMedia> snapshot;
+	snapshot.reserve(state.remoteMedia.size());
+	for (const std::pair<const std::string, LiveKitRemoteMedia> &entry
+			: state.remoteMedia) {
+		snapshot.push_back(entry.second);
+	}
+	state.delegate->liveKitRemoteMediaChanged(snapshot);
+}
+
 void ReleaseAll(LiveKitAdapterShared &state) {
 	LiveKitFfi &library = *state.library;
 	for (const std::pair<const std::string, LiveKitRemoteTrack> &entry
@@ -612,6 +826,10 @@ void ReleaseAll(LiveKitAdapterShared &state) {
 		library.dropHandle(entry.second.handle);
 	}
 	state.remotePublications.clear();
+	if (!state.remoteMedia.empty()) {
+		state.remoteMedia.clear();
+		NotifyRemoteMedia(state);
+	}
 	for (const std::uint64_t handle : state.publicationHandles) {
 		library.dropHandle(handle);
 	}
@@ -629,12 +847,17 @@ void ReleaseAll(LiveKitAdapterShared &state) {
 		library.eventRouter().clearKeys(state.routeId);
 	}
 	state.publishAsyncIds.clear();
+	state.statsAsyncIds.clear();
 	state.connectAsyncId.reset();
 	state.disconnectAsyncId.reset();
 	state.disconnectRequested = false;
 	state.microphoneRequested = false;
 	state.cameraRequested = false;
 	state.screenRequested = false;
+	// The platform audio is gone with its handle, so no device is selected any more.
+	state.playoutDeviceSelected = false;
+	state.recordingDeviceSelected = false;
+	RefreshShownStream(state);
 }
 
 // Releases the stream and the handle of a remote track. The stream key is
@@ -649,6 +872,22 @@ void ReleaseRemoteTrack(
 	if (track.trackHandle) {
 		state.library->dropHandle(*track.trackHandle);
 	}
+}
+
+// Publishes the stream handle of the shown track to the library thread. With no
+// shown track set, no stream is shown, so every frame is dropped; before the
+// first setShownVideoTrack call the filter is off and every frame is copied.
+void RefreshShownStream(LiveKitAdapterShared &state) {
+	std::uint64_t stream = 0;
+	if (state.shownFilterSet && !state.shownTrackSid.empty()) {
+		const std::map<std::string, LiveKitRemoteTrack>::iterator found =
+			state.remoteTracks.find(state.shownTrackSid);
+		if (found != state.remoteTracks.end() && found->second.streamHandle) {
+			stream = *found->second.streamHandle;
+		}
+	}
+	state.shownStreamHandle.store(stream);
+	state.videoFilterOn.store(state.shownFilterSet);
 }
 
 // Removes the route of a destroyed adapter once its room is gone, so the
@@ -675,6 +914,7 @@ void FailWith(LiveKitAdapterShared &state, const char *message) {
 	}
 	ReleaseAll(state);
 	state.phase = Phase::Failed;
+	SendLog(state, std::string("failed: ") + message);
 	if (state.delegate) {
 		state.delegate->liveKitFailed(message);
 	}
@@ -684,6 +924,7 @@ void FailWith(LiveKitAdapterShared &state, const char *message) {
 void FinishDisconnected(LiveKitAdapterShared &state) {
 	ReleaseAll(state);
 	state.phase = Phase::Idle;
+	SendLog(state, "disconnected");
 	if (state.delegate) {
 		state.delegate->liveKitDisconnected();
 	}
@@ -704,19 +945,138 @@ void SendDisconnect(LiveKitAdapterShared &state) {
 	state.phase = Phase::Disconnecting;
 }
 
+// Creates the PlatformAudio, which plays the remote audio and captures the
+// microphone. The device counts of the library are logged, and the selected
+// devices are applied. Returns false when the library creates no handle.
+bool CreatePlatformAudio(LiveKitAdapterShared &state) {
+	const std::optional<std::vector<std::uint8_t>> response =
+		state.library->request(EncodeLiveKitNewPlatformAudioRequest());
+	if (!response) {
+		return false;
+	}
+	state.platformAudioHandle = DecodeLiveKitHandleResponse(
+		*response,
+		kResponseNewPlatformAudio).handle;
+	if (!state.platformAudioHandle) {
+		return false;
+	}
+	const std::optional<LiveKitPlatformAudioInfo> info =
+		DecodePlatformAudioInfo(*response);
+	if (info) {
+		SendLog(
+			state,
+			"PlatformAudio created, recording devices "
+				+ std::to_string(info->recordingDeviceCount)
+				+ ", playout devices "
+				+ std::to_string(info->playoutDeviceCount));
+	} else {
+		SendLog(state, "PlatformAudio created");
+	}
+	ApplyStoredAudioDevices(state);
+	return true;
+}
+
+// Applies the stored device ids. A device problem never fails the room, so
+// the results are only logged. An empty id sends no request at all.
+void ApplyStoredAudioDevices(LiveKitAdapterShared &state) {
+	ApplyAudioDevice(state, state.playoutDeviceId, true);
+	ApplyAudioDevice(state, state.recordingDeviceId, false);
+}
+
+// Selects the playout or the recording device by its endpoint id. The library
+// lists the devices, the device whose guid equals the id (without the case) is
+// selected with its own guid. An id that the library does not list is logged as
+// a mismatch and changes nothing. An empty id sends nothing when no device was
+// selected before; after a selection it selects the first listed device, the
+// protocol having no request for the default one. Returns false when the library
+// reports an error.
+bool ApplyAudioDevice(
+		LiveKitAdapterShared &state,
+		const std::string &deviceId,
+		bool playout) {
+	const char *kind = playout ? "playout" : "recording";
+	bool &selected = playout
+		? state.playoutDeviceSelected
+		: state.recordingDeviceSelected;
+	if (deviceId.empty() && !selected) {
+		SendLog(state, std::string(kind) + " device: default");
+		return true;
+	}
+	if (!state.platformAudioHandle) {
+		return false;
+	}
+	const std::optional<std::vector<std::uint8_t>> listResponse =
+		state.library->request(
+			EncodeLiveKitGetAudioDevicesRequest(*state.platformAudioHandle));
+	const std::optional<LiveKitAudioDeviceList> list = listResponse
+		? DecodeLiveKitAudioDevices(*listResponse)
+		: std::nullopt;
+	if (!list || !list->error.empty()) {
+		SendLog(state, std::string("LiveKit ") + kind + " device list failed");
+		return false;
+	}
+	const std::vector<LiveKitAudioDevice> &devices = playout
+		? list->playout
+		: list->recording;
+	const LiveKitAudioDevice *match = nullptr;
+	if (deviceId.empty()) {
+		// The protocol has no request for the default device. The first listed
+		// device stands in for it, and the library default is not confirmed.
+		if (!devices.empty()) {
+			match = &devices.front();
+		}
+	} else {
+		for (const LiveKitAudioDevice &device : devices) {
+			if (EqualsIgnoreCase(device.guid, deviceId)) {
+				match = &device;
+				break;
+			}
+		}
+	}
+	if (!match) {
+		if (deviceId.empty()) {
+			SendLog(state, std::string(kind) + " device: default, no device is listed, the previous device is kept");
+		} else {
+			// The library guid of Windows is a device interface path, so the
+			// endpoint id of the settings may never equal it.
+			SendLog(state, std::string(kind) + " device not listed, the id format of the setting may not match the library guid");
+		}
+		return true;
+	}
+	const std::optional<std::vector<std::uint8_t>> response =
+		state.library->request(
+			playout
+				? EncodeLiveKitSetPlayoutDeviceRequest(
+					*state.platformAudioHandle,
+					match->guid)
+				: EncodeLiveKitSetRecordingDeviceRequest(
+					*state.platformAudioHandle,
+					match->guid));
+	const std::optional<std::string> error = response
+		? DecodeLiveKitSetDeviceResponse(
+			*response,
+			playout ? kResponseSetPlayoutDevice : kResponseSetRecordingDevice)
+		: std::nullopt;
+	if (!error || !error->empty()) {
+		SendLog(state, std::string("LiveKit ") + kind + " device selection failed");
+		return false;
+	}
+	selected = !deviceId.empty();
+	SendLog(
+		state,
+		std::string(kind)
+			+ " device: "
+			+ (match->name.empty() ? std::string("default") : match->name));
+	return true;
+}
+
 // Runs once the room is connected. PlatformAudio plays the remote audio, so it
 // is created before the delegate hears of the connection. The library is then
 // told that the room events are read: it holds them, the track subscriptions
 // included, until this request. Returns false when a step fails, and the room
 // is then failed.
 bool StartSession(LiveKitAdapterShared &state) {
-	if (!state.platformAudioHandle) {
-		state.platformAudioHandle = RequestHandle(
-			state,
-			EncodeLiveKitNewPlatformAudioRequest(),
-			kResponseNewPlatformAudio);
-	}
-	if (!state.platformAudioHandle) {
+	if (!state.platformAudioHandle && !CreatePlatformAudio(state)) {
 		FailWith(state, kConnectFailed);
 		return false;
 	}
@@ -735,6 +1095,7 @@ bool PublishTrack(
 		std::uint64_t trackHandle,
 		LiveKitTrackSource source,
 		LiveKitPublishKind kind) {
+	SendLog(state, std::string("publish requested: ") + PublishKindName(kind));
 	const std::uint64_t asyncId = NextRequestAsyncId();
 	AddKey(state, asyncId);
 	const std::optional<std::vector<std::uint8_t>> response =
@@ -745,6 +1106,7 @@ bool PublishTrack(
 				source,
 				asyncId));
 	if (!RequestAccepted(response, kResponsePublishTrack, asyncId)) {
+		SendLog(state, std::string("publish failed: ") + PublishKindName(kind));
 		FailWith(state, kPublishFailed);
 		return false;
 	}
@@ -814,12 +1176,33 @@ std::optional<LiveKitVideoFrame> CopyVideoFrame(
 	return result;
 }
 
+// True when frames of the stream are copied and delivered. The stream of the
+// shown track is the only one while the filter is on, and a frame without a
+// shown stream is never delivered.
+bool IsShownStream(
+		const LiveKitAdapterShared &state,
+		std::uint64_t streamHandle) {
+	if (!state.videoFilterOn.load()) {
+		return true;
+	}
+	const std::uint64_t shown = state.shownStreamHandle.load();
+	return shown != 0 && shown == streamHandle;
+}
+
 // Hands a frame of a video stream to the owner thread. It runs on the library
-// thread, because the frame data is valid only there.
+// thread, because the frame data is valid only there. A frame of a stream that
+// is not shown is released without a copy.
 void RouteVideoFrame(
 		const std::shared_ptr<LiveKitAdapterShared> &owner,
 		const LiveKitEvent &event) {
 	if (!event.videoBuffer) {
+		return;
+	}
+	if (!event.streamHandle || !IsShownStream(*owner, *event.streamHandle)) {
+		const std::uint64_t bufferHandle = event.videoBuffer->bufferHandle;
+		if (bufferHandle) {
+			owner->library->dropHandle(bufferHandle);
+		}
 		return;
 	}
 	std::optional<LiveKitVideoFrame> frame = CopyVideoFrame(
@@ -867,6 +1250,7 @@ void DispatchConnect(
 	if (!StartSession(state)) {
 		return;
 	}
+	SendLog(state, "connected");
 	if (state.delegate) {
 		state.delegate->liveKitConnected();
 	}
@@ -891,11 +1275,13 @@ void DispatchPublish(
 		return;
 	}
 	if (!event.error.empty() || !event.publicationHandle) {
+		SendLog(state, std::string("publish failed: ") + PublishKindName(kind));
 		FailWith(state, kPublishFailed);
 		return;
 	}
 	AddKey(state, *event.publicationHandle);
 	state.publicationHandles.push_back(*event.publicationHandle);
+	SendLog(state, std::string("publish confirmed: ") + PublishKindName(kind));
 	if (state.delegate) {
 		state.delegate->liveKitPublished(kind);
 	}
@@ -917,16 +1303,28 @@ void DispatchDisconnect(
 void DispatchRoomDisconnected(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event) {
+	SendLog(
+		state,
+		"room disconnected, reason "
+			+ std::to_string(event.disconnectReason)
+			+ (event.clientInitiated ? ", client initiated" : ", server dropped"));
 	if (state.phase != Phase::Connected || event.clientInitiated) {
 		return;
 	}
 	FailWith(state, kConnectionLost);
 }
 
-// Any E2EE failure state of a track ends the call, as Android does.
+// Any E2EE state change is logged. A failure state of a track ends the call, as
+// Android does.
 void DispatchEncryptionState(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event) {
+	SendLog(
+		state,
+		std::string("encryption state: ")
+			+ event.participantIdentity
+			+ ", "
+			+ EncryptionStateName(event.encryptionState));
 	if (state.phase != Phase::Connected
 		|| !IsEncryptionFailure(event.encryptionState)) {
 		return;
@@ -969,11 +1367,33 @@ void DispatchTrackSubscribed(
 		}
 	}
 	state.remoteTracks.emplace(event.trackSid, std::move(track));
+
+	// The media entry keeps the publication info of the track. A track that was
+	// published earlier keeps its muted state, which the mute events update; a
+	// track that was not seen published takes the muted state of its info.
+	const bool known = state.remoteMedia.find(event.trackSid) != state.remoteMedia.end();
+	LiveKitRemoteMedia &media = state.remoteMedia[event.trackSid];
+	if (!known) {
+		media.participantIdentity = event.participantIdentity;
+		media.trackSid = event.trackSid;
+		media.kind = event.trackKind;
+		media.muted = event.trackMuted;
+	}
+	media.subscribed = true;
+	SendLog(state, "remote track subscribed: " + DescribeMedia(media));
+	NotifyRemoteMedia(state);
 }
 
 void DispatchTrackUnsubscribed(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event) {
+	const std::map<std::string, LiveKitRemoteMedia>::iterator media =
+		state.remoteMedia.find(event.trackSid);
+	if (media != state.remoteMedia.end()) {
+		media->second.subscribed = false;
+		SendLog(state, "remote track unsubscribed: " + DescribeMedia(media->second));
+		NotifyRemoteMedia(state);
+	}
 	const std::map<std::string, LiveKitRemoteTrack>::iterator found =
 		state.remoteTracks.find(event.trackSid);
 	if (found == state.remoteTracks.end()) {
@@ -1008,6 +1428,24 @@ void DispatchTrackPublished(
 	publication.kind = event.trackKind;
 	publication.handle = *event.publicationHandle;
 	state.remotePublications.emplace(event.trackSid, publication);
+
+	// The media entry starts unsubscribed; a subscription that came first keeps
+	// its state.
+	LiveKitRemoteMedia media;
+	media.participantIdentity = event.participantIdentity;
+	media.trackSid = event.trackSid;
+	media.kind = event.trackKind;
+	media.source = event.trackSource;
+	media.muted = event.trackMuted;
+	const std::map<std::string, LiveKitRemoteMedia>::iterator previousMedia =
+		state.remoteMedia.find(event.trackSid);
+	if (previousMedia != state.remoteMedia.end()) {
+		media.subscribed = previousMedia->second.subscribed;
+	}
+	state.remoteMedia[event.trackSid] = media;
+	SendLog(state, "remote track published: " + DescribeMedia(media));
+	NotifyRemoteMedia(state);
+
 	if (publication.kind != LiveKitTrackKind::Video) {
 		return;
 	}
@@ -1021,6 +1459,13 @@ void DispatchTrackPublished(
 void DispatchTrackUnpublished(
 		LiveKitAdapterShared &state,
 		const LiveKitEvent &event) {
+	const std::map<std::string, LiveKitRemoteMedia>::iterator media =
+		state.remoteMedia.find(event.trackSid);
+	if (media != state.remoteMedia.end()) {
+		SendLog(state, "remote track unpublished: " + DescribeMedia(media->second));
+		state.remoteMedia.erase(media);
+		NotifyRemoteMedia(state);
+	}
 	const std::map<std::string, LiveKitRemotePublication>::iterator found =
 		state.remotePublications.find(event.trackSid);
 	if (found == state.remotePublications.end()) {
@@ -1028,6 +1473,101 @@ void DispatchTrackUnpublished(
 	}
 	state.library->dropHandle(found->second.handle);
 	state.remotePublications.erase(found);
+}
+
+// A mute event of a remote track updates its muted state, and the delegate hears
+// of the change. A track that is not known is ignored.
+void DispatchTrackMute(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event,
+		bool muted) {
+	if (state.phase != Phase::Connected) {
+		return;
+	}
+	const std::map<std::string, LiveKitRemoteMedia>::iterator found =
+		state.remoteMedia.find(event.trackSid);
+	if (found == state.remoteMedia.end() || found->second.muted == muted) {
+		return;
+	}
+	found->second.muted = muted;
+	SendLog(
+		state,
+		std::string(muted ? "remote track muted: " : "remote track unmuted: ")
+			+ DescribeMedia(found->second));
+	NotifyRemoteMedia(state);
+}
+
+// A participant that leaves takes its remote tracks with it. Its media entries
+// are dropped, and its subscriptions and publications are released, so no frame
+// of it is delivered afterwards.
+void DispatchParticipantDisconnected(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	if (state.phase != Phase::Connected) {
+		return;
+	}
+	std::vector<std::string> mediaSids;
+	for (const std::pair<const std::string, LiveKitRemoteMedia> &entry
+			: state.remoteMedia) {
+		if (entry.second.participantIdentity == event.participantIdentity) {
+			mediaSids.push_back(entry.first);
+		}
+	}
+	for (const std::string &sid : mediaSids) {
+		state.remoteMedia.erase(sid);
+	}
+	std::vector<std::string> trackSids;
+	for (const std::pair<const std::string, LiveKitRemoteTrack> &entry
+			: state.remoteTracks) {
+		if (entry.second.participantIdentity == event.participantIdentity) {
+			trackSids.push_back(entry.first);
+		}
+	}
+	for (const std::string &sid : trackSids) {
+		const std::map<std::string, LiveKitRemoteTrack>::iterator found =
+			state.remoteTracks.find(sid);
+		ReleaseRemoteTrack(state, found->second);
+		state.remoteTracks.erase(found);
+	}
+	std::vector<std::string> publicationSids;
+	for (const std::pair<const std::string, LiveKitRemotePublication> &entry
+			: state.remotePublications) {
+		if (entry.second.participantIdentity == event.participantIdentity) {
+			publicationSids.push_back(entry.first);
+		}
+	}
+	for (const std::string &sid : publicationSids) {
+		const std::map<std::string, LiveKitRemotePublication>::iterator found =
+			state.remotePublications.find(sid);
+		state.library->dropHandle(found->second.handle);
+		state.remotePublications.erase(found);
+	}
+	if (!mediaSids.empty()) {
+		NotifyRemoteMedia(state);
+	}
+}
+
+// The stats of a request that the adapter sent are passed to the delegate. A
+// callback with an error is delivered as stats with the error flag.
+void DispatchSessionStats(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	const std::set<std::uint64_t>::iterator found =
+		state.statsAsyncIds.find(event.asyncId);
+	if (found == state.statsAsyncIds.end()) {
+		return;
+	}
+	state.statsAsyncIds.erase(found);
+	LiveKitSessionStats stats;
+	if (event.sessionStats) {
+		stats = *event.sessionStats;
+	} else {
+		stats.error = true;
+	}
+	SendLog(state, stats.error ? "session stats failed" : "session stats received");
+	if (state.delegate) {
+		state.delegate->liveKitSessionStats(stats);
+	}
 }
 
 bool RequestRemoteQuality(
@@ -1055,6 +1595,12 @@ void DispatchVideoFrame(
 		const LiveKitRemoteTrack &track = entry.second;
 		if (track.streamHandle && *track.streamHandle == streamHandle) {
 			frame.participantIdentity = track.participantIdentity;
+			frame.trackSid = entry.first;
+			const std::map<std::string, LiveKitRemoteMedia>::const_iterator media =
+				state.remoteMedia.find(entry.first);
+			frame.source = media != state.remoteMedia.end()
+				? media->second.source
+				: LiveKitTrackSource::Unknown;
 			state.videoSink->liveKitVideoFrame(frame);
 			return;
 		}
@@ -1080,7 +1626,17 @@ void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event) {
 		DispatchTrackPublished(state, event);
 	} else if (event.kind == LiveKitEventKind::TrackUnpublished) {
 		DispatchTrackUnpublished(state, event);
+	} else if (event.kind == LiveKitEventKind::TrackMuted) {
+		DispatchTrackMute(state, event, true);
+	} else if (event.kind == LiveKitEventKind::TrackUnmuted) {
+		DispatchTrackMute(state, event, false);
+	} else if (event.kind == LiveKitEventKind::ParticipantDisconnected) {
+		DispatchParticipantDisconnected(state, event);
+	} else if (event.kind == LiveKitEventKind::SessionStats) {
+		DispatchSessionStats(state, event);
 	}
+	// A track that came or went may be the shown one, so the stream is refreshed.
+	RefreshShownStream(state);
 }
 
 } // namespace

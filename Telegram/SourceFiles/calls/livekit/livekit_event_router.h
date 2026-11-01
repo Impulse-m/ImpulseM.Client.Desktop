@@ -1,8 +1,9 @@
 // Routes the events of the LiveKit library to the room that owns them. A room
 // registers its async ids and its handles as keys. An event goes only to the
 // route that owns its async id or one of its handles, and an event with no
-// owner is dropped, so a closed room receives nothing. Std-only, so the tests
-// link it without the Windows base headers.
+// owner is dropped, so a closed room receives nothing. The records of the
+// library log are not routed: they go to the process log sink. Std-only, so the
+// tests link it without the Windows base headers.
 #pragma once
 
 #include "calls/livekit/livekit_ffi_codec.h"
@@ -20,6 +21,7 @@ public:
 	using Route = std::function<void(const LiveKitEvent &event)>;
 	using RouteId = std::uint64_t;
 	using ReleaseHandle = std::function<void(std::uint64_t handle)>;
+	using LogSink = std::function<void(const LiveKitLogRecord &record)>;
 
 	// releaseHandle releases the library buffer handle of a video frame that no
 	// route takes, so the buffer does not stay owned by the library.
@@ -45,9 +47,14 @@ public:
 	// Stops the route and drops its keys.
 	void removeRoute(RouteId id);
 
+	// Sets the sink of the library log records. It is called on the library
+	// thread for every record of a LogBatch. nullptr stops the delivery.
+	void setLogSink(LogSink sink);
+
 	// Hands the event to the route that owns its async id or one of its
 	// handles. The route runs on the calling thread, outside the lock. A video
-	// frame that no route owns has its buffer handle released.
+	// frame that no route owns has its buffer handle released. A log batch goes
+	// to the log sink, record by record.
 	void dispatch(const LiveKitEvent &event);
 
 private:
@@ -59,6 +66,7 @@ private:
 	std::map<RouteId, Route> routes;
 	std::map<RouteId, std::vector<std::uint64_t>> keysByRoute;
 	std::map<std::uint64_t, RouteId> owners;
+	LogSink logSink;
 };
 
 } // namespace Impulse

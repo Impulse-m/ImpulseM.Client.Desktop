@@ -116,6 +116,7 @@ void CentrifugeClient::close() {
 	rust.reset();
 	subscriptionCallbacks.clear();
 	positionDropped.clear();
+	publicationReceived = nullptr;
 	connectionState = nullptr;
 	setState(CentrifugeState::Closed);
 }
@@ -134,6 +135,10 @@ void CentrifugeClient::setStateCallback(StateCallback callback) {
 
 void CentrifugeClient::setErrorCallback(ErrorCallback callback) {
 	errorReported = std::move(callback);
+}
+
+void CentrifugeClient::setPublicationCallback(PublicationCallback callback) {
+	publicationReceived = std::move(callback);
 }
 
 std::int32_t CentrifugeClient::setTokenCallback(CentrifugoRust::TokenCallback callback) {
@@ -262,13 +267,21 @@ void CentrifugeClient::onEvent(const CentrifugoEvent &event) {
 		break;
 
 	case CentrifugoEventKind::Publication:
+		// The server-side publications of the connection come here, with their
+		// channel. They do not change the connection state.
+		if (publicationReceived) {
+			// A copy: the callback may replace itself while it runs.
+			const PublicationCallback callback = publicationReceived;
+			callback(event.channel, event.data);
+		}
+		break;
+
 	case CentrifugoEventKind::Subscribing:
 	case CentrifugoEventKind::Subscribed:
 	case CentrifugoEventKind::Unsubscribed:
 	case CentrifugoEventKind::SubscriptionError:
-		// Subscriptions and their publications arrive on their own callbacks
-		// (see subscribe()), not on the client callback, and do not change the
-		// connection state.
+		// Subscriptions arrive on their own callbacks (see subscribe()), not on
+		// the client callback, and do not change the connection state.
 		break;
 	}
 }

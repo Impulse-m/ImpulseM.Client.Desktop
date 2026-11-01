@@ -1,10 +1,14 @@
 #include "mtproto/impulse/core/lanes.h"
 
 #include <algorithm>
+#include <string_view>
 
 namespace Impulse {
 
 namespace {
+
+constexpr std::string_view kSessionChannelPrefix = "session:";
+constexpr std::string_view kSystemConfigChannel = "system:config";
 
 [[nodiscard]] bool ContainsId(
 		const std::vector<int64_t> &ids,
@@ -13,6 +17,11 @@ namespace {
 }
 
 } // namespace
+
+bool IsServerSideChannel(std::string_view channel) {
+	return channel.starts_with(kSessionChannelPrefix)
+		|| channel == kSystemConfigChannel;
+}
 
 std::vector<int64_t> SelectChannelLanes(
 		const std::vector<LaneCandidate> &candidates,

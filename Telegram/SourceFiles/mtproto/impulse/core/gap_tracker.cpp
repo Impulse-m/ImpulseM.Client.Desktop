@@ -11,6 +11,13 @@ constexpr std::string_view kUserLanePrefix = "user:";
 
 } // namespace
 
+void GapTracker::onConnected() {
+	if (connectedBefore) {
+		reconnectPending = true;
+	}
+	connectedBefore = true;
+}
+
 void GapTracker::onUnsubscribed(std::string_view channel, int code) {
 	const std::string key(channel);
 	if (code == kPositionDroppedCode) {
@@ -23,16 +30,34 @@ void GapTracker::onUnsubscribed(std::string_view channel, int code) {
 GapAction GapTracker::onSubscribed(
 	std::string_view channel,
 	bool recovered,
-	bool wasRecovering) {
+	bool wasRecovering,
+	GapReason *reason) {
 	const bool dropped = positionDropped.erase(std::string(channel)) > 0;
+	GapAction action = GapAction::None;
+	GapReason cause = GapReason::None;
 	if (IsUserLane(channel)) {
-		return (dropped || !recovered)
-			? GapAction::AccountDifference
-			: GapAction::None;
+		// The first user lane subscribe after a reconnect spends the pending
+		// reconnect, whether or not the lane recovers.
+		const bool reconnect = reconnectPending;
+		reconnectPending = false;
+		if (!recovered) {
+			action = GapAction::AccountDifference;
+			cause = GapReason::NotRecovered;
+		} else if (dropped) {
+			action = GapAction::AccountDifference;
+			cause = GapReason::PositionDropped;
+		} else if (reconnect) {
+			action = GapAction::AccountDifference;
+			cause = GapReason::SocketReconnected;
+		}
+	} else if (dropped || (wasRecovering && !recovered)) {
+		action = GapAction::ChannelDifference;
+		cause = recovered ? GapReason::PositionDropped : GapReason::NotRecovered;
 	}
-	return (dropped || (wasRecovering && !recovered))
-		? GapAction::ChannelDifference
-		: GapAction::None;
+	if (reason) {
+		*reason = cause;
+	}
+	return action;
 }
 
 } // namespace Impulse

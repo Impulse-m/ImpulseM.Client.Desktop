@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace Impulse {
@@ -19,5 +20,10 @@ struct LaneCandidate {
 	const std::vector<LaneCandidate> &candidates,
 	int64_t openedChannelId,
 	int cap = kMaxChannelLanes);
+
+// The channels whose publications the server sends to the update connection
+// without a client subscription: session:{userId}:{sessionHash} and
+// system:config. Any other server-side publication is not accepted.
+[[nodiscard]] bool IsServerSideChannel(std::string_view channel);
 
 } // namespace Impulse

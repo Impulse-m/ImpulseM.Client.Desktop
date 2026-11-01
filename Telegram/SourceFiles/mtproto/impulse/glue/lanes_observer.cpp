@@ -10,7 +10,6 @@ namespace {
 
 constexpr std::string_view kChannelPrefix = "channel:";
 constexpr std::string_view kUserPrefix = "user:";
-constexpr std::string_view kSessionPrefix = "session:";
 constexpr std::string_view kIdentityPrefix = "identity:";
 
 [[nodiscard]] bool IsChannelLane(const std::string &lane) {
@@ -162,14 +161,11 @@ void LanesObserver::unsubscribe(const std::string &lane) {
 }
 
 std::set<std::string> LanesObserver::desiredAccountLanes() const {
+	// No session lane here: the server subscribes it on the connection, and a
+	// client subscription to it is refused.
 	std::set<std::string> result;
 	if (identity.userId > 0) {
-		const std::string userId = std::to_string(identity.userId);
-		result.insert(std::string(kUserPrefix) + userId);
-		if (!identity.sessionHash.empty()) {
-			result.insert(
-				std::string(kSessionPrefix) + userId + ":" + identity.sessionHash);
-		}
+		result.insert(std::string(kUserPrefix) + std::to_string(identity.userId));
 	}
 	if (!identity.identityId.empty()) {
 		result.insert(std::string(kIdentityPrefix) + identity.identityId);

@@ -1,9 +1,10 @@
 // Realtime decode path of one account. The publications of the subscribed
-// lanes become TL Updates for the updates sink; a publication that cannot be
-// read, a wrong constructor, an updatesTooLong frame and a gap of a
-// subscription become difference requests. Qt-free. Owner thread only: the
-// owner creates it on the main thread, which is where the centrifuge client
-// delivers its subscription events.
+// lanes and of the server-side channels (session: and system:config) become TL
+// Updates for the updates sink; a publication that cannot be read, a wrong
+// constructor, an updatesTooLong frame and a gap of a subscription become
+// difference requests. Qt-free. Owner thread only: the owner creates it on the
+// main thread, which is where the centrifuge client delivers its subscription
+// and publication events.
 #pragma once
 
 #include "mtproto/impulse/core/gap_tracker.h"
@@ -34,6 +35,10 @@ public:
 	// channel lanes. May be empty.
 	using UserLaneSubscribed = std::function<void()>;
 
+	// Receives the channel name of a server-side publication that is not an
+	// accepted channel. Its data is dropped.
+	using ChannelDropped = std::function<void(const std::string &channel)>;
+
 private:
 	const Transcoder &transcoder;
 	UpdatesSink updatesSink;
@@ -62,6 +67,18 @@ public:
 	[[nodiscard]] std::int32_t unsubscribe(
 		CentrifugeClient &client,
 		const std::string &channel);
+
+	// Records a connected reply of an update socket. The account difference
+	// of a reconnect is requested by the next user lane subscribe, not here.
+	void onConnected();
+
+	// Routes the server-side publications of the client into the decode path:
+	// session: and system:config are decoded, any other channel goes to
+	// dropped. Replaces the publication callback of the client, so it is called
+	// once for each update client the account creates.
+	void attach(
+		CentrifugeClient &client,
+		ChannelDropped dropped);
 
 private:
 	void onEvent(

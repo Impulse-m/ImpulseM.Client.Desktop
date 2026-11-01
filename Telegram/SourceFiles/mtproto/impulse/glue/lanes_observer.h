@@ -1,7 +1,8 @@
 // Keeps the realtime lanes of one account in line with the chat list. Channel
 // lanes follow the opened channel and the most recent channel dialogs. Account
-// lanes (user, session and identity) follow the signed-in identity. Qt-free:
-// the owner supplies the dialog snapshot, the lane actions and the timer, and
+// lanes (user and identity) follow the signed-in identity. The session lane is
+// not a client lane: the server subscribes it on the connection. Qt-free: the
+// owner supplies the dialog snapshot, the lane actions and the timer, and
 // calls every method from one thread.
 #pragma once
 
@@ -22,7 +23,6 @@ inline constexpr std::chrono::milliseconds kLanesRecomputeDelay
 
 struct LaneIdentity {
 	int64_t userId = 0;
-	std::string sessionHash;
 	std::string identityId;
 };
 

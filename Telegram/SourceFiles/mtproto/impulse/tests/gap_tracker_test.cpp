@@ -80,3 +80,57 @@ IMPULSE_TEST(GapTrackerMarkIsPerChannel) {
 	IMPULSE_CHECK(tracker.onSubscribed("channel:9", false, false)
 		== Impulse::GapAction::ChannelDifference);
 }
+
+IMPULSE_TEST(GapTrackerFirstConnectIsNoReconnectDifference) {
+	Impulse::GapTracker tracker;
+	tracker.onConnected();
+	Impulse::GapReason reason = Impulse::GapReason::NotRecovered;
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", true, true, &reason)
+		== Impulse::GapAction::None);
+	IMPULSE_CHECK(reason == Impulse::GapReason::None);
+}
+
+IMPULSE_TEST(GapTrackerReconnectThenRecoveredUserLaneIsOneSocketReconnect) {
+	Impulse::GapTracker tracker;
+	tracker.onConnected();
+	tracker.onConnected();
+	Impulse::GapReason reason = Impulse::GapReason::None;
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", true, true, &reason)
+		== Impulse::GapAction::AccountDifference);
+	IMPULSE_CHECK(reason == Impulse::GapReason::SocketReconnected);
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", true, true, &reason)
+		== Impulse::GapAction::None);
+}
+
+IMPULSE_TEST(GapTrackerReconnectThenUnrecoveredUserLaneIsOneNotRecovered) {
+	Impulse::GapTracker tracker;
+	tracker.onConnected();
+	tracker.onConnected();
+	Impulse::GapReason reason = Impulse::GapReason::None;
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", false, true, &reason)
+		== Impulse::GapAction::AccountDifference);
+	IMPULSE_CHECK(reason == Impulse::GapReason::NotRecovered);
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", true, true, &reason)
+		== Impulse::GapAction::None);
+}
+
+IMPULSE_TEST(GapTrackerReconnectWaitsForUserLaneSubscribe) {
+	Impulse::GapTracker tracker;
+	tracker.onConnected();
+	tracker.onConnected();
+	IMPULSE_CHECK(tracker.onSubscribed("channel:9", true, true)
+		== Impulse::GapAction::None);
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", true, true)
+		== Impulse::GapAction::AccountDifference);
+}
+
+IMPULSE_TEST(GapTrackerDroppedPositionReasonWinsOverReconnect) {
+	Impulse::GapTracker tracker;
+	tracker.onConnected();
+	tracker.onConnected();
+	tracker.onUnsubscribed("user:5", 2502);
+	Impulse::GapReason reason = Impulse::GapReason::None;
+	IMPULSE_CHECK(tracker.onSubscribed("user:5", true, true, &reason)
+		== Impulse::GapAction::AccountDifference);
+	IMPULSE_CHECK(reason == Impulse::GapReason::PositionDropped);
+}

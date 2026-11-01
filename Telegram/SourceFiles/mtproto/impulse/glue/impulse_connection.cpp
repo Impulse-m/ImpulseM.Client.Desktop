@@ -1149,6 +1149,28 @@ void ImpulseConnection::buildTransport(const TransportRoute &route) {
 			LOG(("ImpulseM Error: update client was not created, status %1.").arg(updateStatus));
 		}
 
+		// The realtime tracker counts the connected replies of the account, so a
+		// reconnect is recognized across rebuilt update clients. The account
+		// difference of the reconnect is requested by its next user lane subscribe.
+		updateClient->setStateCallback([this](CentrifugeState next) {
+			if (next != CentrifugeState::Connected || !realtime) {
+				return;
+			}
+			DEBUG_LOG(("Impulse Info: connection %1 update socket connected."
+				).arg(QString::number(serial)));
+			realtime->onConnected();
+		});
+
+		// The server publishes the session lane and system:config to this socket, so
+		// the realtime path decodes them from its publication callback.
+		if (realtime) {
+			realtime->attach(*updateClient, [this](const std::string &channel) {
+				DEBUG_LOG(("Impulse Info: connection %1 dropped a server publication of channel %2."
+					).arg(QString::number(serial)
+					).arg(QString::fromStdString(channel)));
+			});
+		}
+
 		CentrifugoConfig poolConfig;
 		poolConfig.proxyUrl = route.proxyUrl;
 		poolClient = std::make_unique<CentrifugeClient>();

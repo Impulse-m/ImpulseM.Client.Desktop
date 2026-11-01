@@ -1,6 +1,7 @@
 #include "mtproto/impulse/glue/realtime.h"
 
 #include "mtproto/impulse/core/envelope.h"
+#include "mtproto/impulse/core/lanes.h"
 #include "mtproto/impulse/core/transcoder.h"
 
 #include <array>
@@ -35,6 +36,7 @@ constexpr std::string_view kReasonUnexpectedConstructor = "publication_unexpecte
 constexpr std::string_view kReasonUpdatesTooLong = "updates_too_long";
 constexpr std::string_view kReasonSubscribePositionDropped = "subscribe_position_dropped";
 constexpr std::string_view kReasonSubscribeNotRecovered = "subscribe_not_recovered";
+constexpr std::string_view kReasonSocketReconnected = "socket_reconnected";
 
 [[nodiscard]] bool IsUserLane(std::string_view channel) {
 	return channel.starts_with(kUserLanePrefix);
@@ -60,6 +62,21 @@ constexpr std::string_view kReasonSubscribeNotRecovered = "subscribe_not_recover
 		}
 	}
 	return false;
+}
+
+// The reason of a difference the tracker asked for. None never reaches here:
+// the caller asks only when a difference is due.
+[[nodiscard]] std::string_view DifferenceReason(GapReason reason) {
+	switch (reason) {
+	case GapReason::PositionDropped:
+		return kReasonSubscribePositionDropped;
+	case GapReason::SocketReconnected:
+		return kReasonSocketReconnected;
+	case GapReason::NotRecovered:
+	case GapReason::None:
+		break;
+	}
+	return kReasonSubscribeNotRecovered;
 }
 
 } // namespace
@@ -99,6 +116,33 @@ std::int32_t Realtime::unsubscribe(
 	return client.unsubscribe(channel);
 }
 
+void Realtime::onConnected() {
+	gaps.onConnected();
+}
+
+void Realtime::attach(
+		CentrifugeClient &client,
+		ChannelDropped dropped) {
+	std::shared_ptr<bool> keepAlive = alive;
+	client.setPublicationCallback(
+		[this, keepAlive, dropped = std::move(dropped)](
+				const std::string &channel,
+				const std::vector<std::uint8_t> &data) {
+			if (!*keepAlive) {
+				return;
+			}
+			if (!IsServerSideChannel(channel)) {
+				// Not decoded and not a difference trigger: the channel is not
+				// one the server publishes to this connection.
+				if (dropped) {
+					dropped(channel);
+				}
+				return;
+			}
+			onPublication(data);
+		});
+}
+
 void Realtime::onEvent(
 		const std::string &channel,
 		const CentrifugeSubscriptionEvent &event) {
@@ -135,16 +179,19 @@ void Realtime::onSubscribed(
 		const std::string &channel,
 		bool recovered,
 		bool wasRecovering) {
-	const GapAction action = gaps.onSubscribed(channel, recovered, wasRecovering);
+	GapReason reason = GapReason::None;
+	const GapAction action = gaps.onSubscribed(
+		channel,
+		recovered,
+		wasRecovering,
+		&reason);
 	if (action == GapAction::AccountDifference) {
-		requestDifference(
-			recovered ? kReasonSubscribePositionDropped : kReasonSubscribeNotRecovered,
-			std::string());
+		requestDifference(DifferenceReason(reason), std::string());
 	} else if (action == GapAction::ChannelDifference) {
 		// Only a channel lane names its channel; the other lanes fall back to
 		// the account difference.
 		requestDifference(
-			recovered ? kReasonSubscribePositionDropped : kReasonSubscribeNotRecovered,
+			DifferenceReason(reason),
 			IsChannelLane(channel) ? channel : std::string());
 	}
 	if (IsUserLane(channel) && userLaneSubscribed) {

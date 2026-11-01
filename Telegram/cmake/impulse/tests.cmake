@@ -31,6 +31,9 @@ PRIVATE
     # headers.
     calls/livekit/livekit_event_router.cpp
     calls/livekit/livekit_adapter.cpp
+    # Account lane bookkeeping of the realtime path, std only: tested with
+    # recording lane actions. The rest of the glue links the Rust client.
+    mtproto/impulse/glue/lanes_observer.cpp
 )
 
 target_link_libraries(impulse_tests

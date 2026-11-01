@@ -84,3 +84,21 @@ IMPULSE_TEST(LanesZeroCapGivesNothing) {
 	const std::vector<int64_t> result = Impulse::SelectChannelLanes(candidates, 3, 0);
 	IMPULSE_CHECK(result.empty());
 }
+
+IMPULSE_TEST(ServerSideChannelAcceptsSessionLanesAndSystemConfig) {
+	IMPULSE_CHECK(Impulse::IsServerSideChannel("session:42:9f8e7d"));
+	IMPULSE_CHECK(Impulse::IsServerSideChannel("system:config"));
+}
+
+IMPULSE_TEST(ServerSideChannelRefusesOtherChannels) {
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("system:config2"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("system:configx"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("system"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("user:42"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("channel:7"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("identity:abc"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("session"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("Session:42:9f8e7d"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel("SYSTEM:CONFIG"));
+	IMPULSE_CHECK(!Impulse::IsServerSideChannel(""));
+}

@@ -160,3 +160,19 @@ IMPULSE_TEST(EnvelopeFactoriesSetFields) {
 	IMPULSE_CHECK(!Envelope::Undecodable().decodable());
 	IMPULSE_CHECK(Envelope::LegacySessionRevoked().decodable());
 }
+
+IMPULSE_TEST(EnvelopeZeroPtsFramesAreUnnumbered) {
+	const Envelope ptsOnly = ParseEnvelope(
+		R"({"type":3,"pts":0,"date":5,"data":"CAE="})");
+	IMPULSE_CHECK(ptsOnly.kind == Envelope::Kind::Unnumbered);
+	IMPULSE_CHECK(ptsOnly.pts == 0);
+	IMPULSE_CHECK(ptsOnly.ptsCount == 0);
+	IMPULSE_CHECK(ptsOnly.updatesProto == kBodyBytes);
+
+	const Envelope ptsCountOnly = ParseEnvelope(
+		R"({"type":3,"ptsCount":0,"date":5,"data":"CAE="})");
+	IMPULSE_CHECK(ptsCountOnly.kind == Envelope::Kind::Unnumbered);
+	IMPULSE_CHECK(ptsCountOnly.pts == 0);
+	IMPULSE_CHECK(ptsCountOnly.ptsCount == 0);
+	IMPULSE_CHECK(ptsCountOnly.updatesProto == kBodyBytes);
+}

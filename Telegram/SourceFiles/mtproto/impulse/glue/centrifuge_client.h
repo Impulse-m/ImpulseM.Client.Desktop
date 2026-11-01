@@ -63,6 +63,9 @@ public:
 	using StateCallback = std::function<void(CentrifugeState state)>;
 	using ErrorCallback = std::function<void(std::uint32_t kind, const std::string &text)>;
 	using SubscriptionCallback = std::function<void(const CentrifugeSubscriptionEvent &event)>;
+	using PublicationCallback = std::function<void(
+		const std::string &channel,
+		const std::vector<std::uint8_t> &data)>;
 
 private:
 	std::unique_ptr<CentrifugoRust> rust;
@@ -70,6 +73,7 @@ private:
 	CentrifugeState state = CentrifugeState::Disconnected;
 	StateCallback stateChanged;
 	ErrorCallback errorReported;
+	PublicationCallback publicationReceived;
 	ConnectionStateHost *connectionState = nullptr;
 	std::map<std::string, SubscriptionCallback> subscriptionCallbacks;
 	std::set<std::string> positionDropped;
@@ -115,6 +119,12 @@ public:
 
 	void setStateCallback(StateCallback callback);
 	void setErrorCallback(ErrorCallback callback);
+
+	// Receives the server-side publications of the client, with their channel.
+	// They are not subscription publications: the channels are subscribed by the
+	// server on the connection, so there is no subscribe() for them. The
+	// callback is cleared by close().
+	void setPublicationCallback(PublicationCallback callback);
 
 	// The pool fleet is token-less: a token callback is refused there.
 	[[nodiscard]] std::int32_t setTokenCallback(CentrifugoRust::TokenCallback callback);

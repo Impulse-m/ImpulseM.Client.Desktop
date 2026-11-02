@@ -1770,6 +1770,8 @@ void Call::destroyController() {
 		_instance.reset();
 		DEBUG_LOG(("Call Info: Call controller destroyed."));
 	}
+	// No frames come without the controller, the ended call panel shows the userpic.
+	_videoIncoming->setState(Webrtc::VideoState::Inactive);
 	setSignalBarCount(kSignalBarFinished);
 }
 

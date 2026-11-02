@@ -13,6 +13,7 @@ constexpr std::uint32_t kFfiRequestDispose = 2;
 constexpr std::uint32_t kFfiRequestConnect = 3;
 constexpr std::uint32_t kFfiRequestDisconnect = 4;
 constexpr std::uint32_t kFfiRequestPublishTrack = 5;
+constexpr std::uint32_t kFfiRequestUnpublishTrack = 6;
 constexpr std::uint32_t kFfiRequestGetSessionStats = 12;
 constexpr std::uint32_t kFfiRequestCreateVideoTrack = 15;
 constexpr std::uint32_t kFfiRequestCreateAudioTrack = 16;
@@ -157,7 +158,15 @@ constexpr std::uint32_t kPublishLocalParticipantHandle = 1;
 constexpr std::uint32_t kPublishTrackHandle = 2;
 constexpr std::uint32_t kPublishOptions = 3;
 constexpr std::uint32_t kPublishRequestAsyncId = 4;
+constexpr std::uint32_t kPublishOptionsSimulcast = 6;
 constexpr std::uint32_t kPublishOptionsSource = 7;
+
+// UnpublishTrackRequest fields and the error of UnpublishTrackCallback.
+constexpr std::uint32_t kUnpublishLocalParticipantHandle = 1;
+constexpr std::uint32_t kUnpublishTrackSid = 2;
+constexpr std::uint32_t kUnpublishStopOnUnpublish = 3;
+constexpr std::uint32_t kUnpublishRequestAsyncId = 4;
+constexpr std::uint32_t kUnpublishCallbackError = 2;
 
 // Response and event fields. Every async response starts with async_id = 1.
 constexpr std::uint32_t kAsyncId = 1;
@@ -172,6 +181,7 @@ constexpr std::uint32_t kEventVideoStream = 3;
 constexpr std::uint32_t kEventConnect = 5;
 constexpr std::uint32_t kEventDisconnect = 7;
 constexpr std::uint32_t kEventPublishTrack = 9;
+constexpr std::uint32_t kEventUnpublishTrack = 10;
 constexpr std::uint32_t kEventLogs = 18;
 constexpr std::uint32_t kEventSessionStats = 19;
 
@@ -209,6 +219,32 @@ constexpr std::uint32_t kInboundFramesDecoded = 4;
 constexpr std::uint32_t kInboundBytesReceived = 25;
 constexpr std::uint32_t kInboundTotalSamplesReceived = 35;
 constexpr std::uint32_t kInboundAudioLevel = 41;
+
+// OutboundRtp.outbound and the OutboundRtpStreamStats fields that the codec
+// reads. The quality limitation reason is a QualityLimitationReason number.
+constexpr std::uint32_t kOutboundStatsField = 4;
+constexpr std::uint32_t kOutboundRid = 4;
+constexpr std::uint32_t kOutboundRetransmittedPacketsSent = 6;
+constexpr std::uint32_t kOutboundTargetBitrate = 9;
+constexpr std::uint32_t kOutboundFrameWidth = 11;
+constexpr std::uint32_t kOutboundFrameHeight = 12;
+constexpr std::uint32_t kOutboundFramesPerSecond = 13;
+constexpr std::uint32_t kOutboundFramesSent = 14;
+constexpr std::uint32_t kOutboundFramesEncoded = 16;
+constexpr std::uint32_t kOutboundKeyFramesEncoded = 17;
+constexpr std::uint32_t kOutboundQualityLimitationReason = 21;
+constexpr std::uint32_t kOutboundNackCount = 24;
+constexpr std::uint32_t kOutboundPliCount = 26;
+constexpr std::uint32_t kOutboundActive = 29;
+
+// The video fields of InboundRtpStreamStats that the codec reads.
+constexpr std::uint32_t kInboundKeyFramesDecoded = 5;
+constexpr std::uint32_t kInboundFramesDropped = 7;
+constexpr std::uint32_t kInboundFrameWidth = 8;
+constexpr std::uint32_t kInboundFrameHeight = 9;
+constexpr std::uint32_t kInboundFramesPerSecond = 10;
+constexpr std::uint32_t kInboundPauseCount = 15;
+constexpr std::uint32_t kInboundFreezeCount = 17;
 
 // LogBatch and LogRecord fields (livekit-ffi protocol).
 constexpr std::uint32_t kLogBatchRecords = 1;
@@ -403,6 +439,26 @@ constexpr std::uint32_t kComponentSize = 3;
 		return std::nullopt;
 	}
 	return FindVarint(*handle, kOwnedHandleValue);
+}
+
+// Reads the sid of an OwnedTrackPublication from its TrackPublicationInfo. The
+// sid is empty when the publication carries no info.
+[[nodiscard]] std::string PublicationSid(
+		std::span<const std::uint8_t> publication) {
+	const std::optional<std::span<const std::uint8_t>> info = FindMessage(
+		publication,
+		kOwnedTrackInfo);
+	if (!info) {
+		return std::string();
+	}
+	return FindString(*info, kTrackInfoSid).value_or(std::string());
+}
+
+// Reads a 32-bit count or size field, zero when the field is absent.
+[[nodiscard]] std::uint32_t FindUint32(
+		std::span<const std::uint8_t> data,
+		std::uint32_t field) {
+	return static_cast<std::uint32_t>(FindVarint(data, field).value_or(0));
 }
 
 [[nodiscard]] LiveKitTrackKind TrackKindOf(std::uint64_t kind) {
@@ -753,7 +809,7 @@ void DecodeVideoStreamEvent(
 	return result;
 }
 
-// Reads the sent counters of an outbound RTP stream.
+// Reads the sent counters and the video fields of an outbound RTP stream.
 [[nodiscard]] LiveKitOutboundRtpStats DecodeOutboundRtp(
 		std::span<const std::uint8_t> body) {
 	LiveKitOutboundRtpStats result;
@@ -769,11 +825,34 @@ void DecodeVideoStreamEvent(
 		result.packetsSent = FindVarint(*sent, kSentPacketsSent).value_or(0);
 		result.bytesSent = FindVarint(*sent, kSentBytesSent).value_or(0);
 	}
+	const std::optional<std::span<const std::uint8_t>> outbound =
+		FindMessage(body, kOutboundStatsField);
+	if (outbound) {
+		result.rid = FindString(*outbound, kOutboundRid).value_or(std::string());
+		result.frameWidth = FindUint32(*outbound, kOutboundFrameWidth);
+		result.frameHeight = FindUint32(*outbound, kOutboundFrameHeight);
+		result.framesPerSecond = FindDouble(
+			*outbound,
+			kOutboundFramesPerSecond).value_or(0.);
+		result.framesSent = FindUint32(*outbound, kOutboundFramesSent);
+		result.framesEncoded = FindUint32(*outbound, kOutboundFramesEncoded);
+		result.keyFramesEncoded = FindUint32(*outbound, kOutboundKeyFramesEncoded);
+		result.retransmittedPacketsSent = FindVarint(
+			*outbound,
+			kOutboundRetransmittedPacketsSent).value_or(0);
+		result.targetBitrate = FindDouble(*outbound, kOutboundTargetBitrate).value_or(0.);
+		result.qualityLimitationReason = FindUint32(
+			*outbound,
+			kOutboundQualityLimitationReason);
+		result.active = FindVarint(*outbound, kOutboundActive).value_or(0) != 0;
+		result.pliCount = FindUint32(*outbound, kOutboundPliCount);
+		result.nackCount = FindUint32(*outbound, kOutboundNackCount);
+	}
 	return result;
 }
 
 // Reads the received counters of an inbound RTP stream. The audio fields are
-// read for audio streams and the frame count for video streams.
+// read for audio streams, and the frame fields for video streams.
 [[nodiscard]] LiveKitInboundRtpStats DecodeInboundRtp(
 		std::span<const std::uint8_t> body) {
 	LiveKitInboundRtpStats result;
@@ -806,6 +885,15 @@ void DecodeVideoStreamEvent(
 			if (frames) {
 				result.framesDecoded = static_cast<std::uint32_t>(*frames);
 			}
+			result.keyFramesDecoded = FindUint32(*inbound, kInboundKeyFramesDecoded);
+			result.framesDropped = FindUint32(*inbound, kInboundFramesDropped);
+			result.frameWidth = FindUint32(*inbound, kInboundFrameWidth);
+			result.frameHeight = FindUint32(*inbound, kInboundFrameHeight);
+			result.framesPerSecond = FindDouble(
+				*inbound,
+				kInboundFramesPerSecond).value_or(0.);
+			result.pauseCount = FindUint32(*inbound, kInboundPauseCount);
+			result.freezeCount = FindUint32(*inbound, kInboundFreezeCount);
 		}
 	}
 	return result;
@@ -1098,8 +1186,14 @@ std::vector<std::uint8_t> EncodeLiveKitPublishTrackRequest(
 		std::uint64_t localParticipantHandle,
 		std::uint64_t trackHandle,
 		LiveKitTrackSource source,
-		std::optional<std::uint64_t> requestAsyncId) {
+		std::optional<std::uint64_t> requestAsyncId,
+		std::optional<bool> simulcast) {
 	ProtoWriter options;
+	if (simulcast) {
+		options.writeVarintField(
+			kPublishOptionsSimulcast,
+			BoolValue(*simulcast));
+	}
 	options.writeVarintField(
 		kPublishOptionsSource,
 		static_cast<std::uint64_t>(source));
@@ -1114,6 +1208,36 @@ std::vector<std::uint8_t> EncodeLiveKitPublishTrackRequest(
 		publish.writeVarintField(kPublishRequestAsyncId, *requestAsyncId);
 	}
 	return WrapFfiRequest(kFfiRequestPublishTrack, publish);
+}
+
+std::vector<std::uint8_t> EncodeLiveKitUnpublishTrackRequest(
+		std::uint64_t localParticipantHandle,
+		const std::string &trackSid,
+		bool stopOnUnpublish,
+		std::optional<std::uint64_t> requestAsyncId) {
+	ProtoWriter unpublish;
+	unpublish.writeVarintField(
+		kUnpublishLocalParticipantHandle,
+		localParticipantHandle);
+	unpublish.writeStringField(kUnpublishTrackSid, trackSid);
+	unpublish.writeVarintField(
+		kUnpublishStopOnUnpublish,
+		BoolValue(stopOnUnpublish));
+	if (requestAsyncId) {
+		unpublish.writeVarintField(kUnpublishRequestAsyncId, *requestAsyncId);
+	}
+	return WrapFfiRequest(kFfiRequestUnpublishTrack, unpublish);
+}
+
+std::string LiveKitQualityLimitationName(std::uint32_t reason) {
+	if (reason == 0) {
+		return "none";
+	} else if (reason == 1) {
+		return "cpu";
+	} else if (reason == 2) {
+		return "bandwidth";
+	}
+	return "other";
 }
 
 std::vector<std::uint8_t> EncodeLiveKitLocalTrackMuteRequest(
@@ -1254,6 +1378,7 @@ LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 				|| field == kEventConnect
 				|| field == kEventDisconnect
 				|| field == kEventPublishTrack
+				|| field == kEventUnpublishTrack
 				|| field == kEventLogs
 				|| field == kEventSessionStats;
 			if (!used
@@ -1291,6 +1416,14 @@ LiveKitEvent DecodeLiveKitEvent(const std::vector<std::uint8_t> &event) {
 					kPublishCallbackPublication);
 				if (publication) {
 					result.publicationHandle = OwnedHandleId(*publication);
+					result.trackSid = PublicationSid(*publication);
+				}
+			} else if (field == kEventUnpublishTrack) {
+				result.kind = LiveKitEventKind::UnpublishTrack;
+				if (const std::optional<std::string> error = FindString(
+						payload,
+						kUnpublishCallbackError)) {
+					result.error = *error;
 				}
 			} else {
 				result.kind = LiveKitEventKind::Connect;

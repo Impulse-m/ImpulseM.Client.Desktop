@@ -34,6 +34,21 @@ struct LiveKitRemotePublication final {
 	std::uint64_t handle = 0;
 };
 
+// A local publication of the room, kept by its publish kind. The handle is owned
+// by the adapter until the publication is unpublished or the room is released,
+// and the sid names the track in the unpublish request.
+struct LiveKitLocalPublication final {
+	std::uint64_t handle = 0;
+	std::string sid;
+};
+
+// An unpublish request in flight. The handle is the publication that the request
+// removes, so its callback releases that publication and no newer one.
+struct LiveKitUnpublishRequest final {
+	LiveKitPublishKind kind = LiveKitPublishKind::Camera;
+	std::uint64_t handle = 0;
+};
+
 namespace {
 
 // FfiResponse field numbers of the requests the adapter sends (livekit-ffi
@@ -41,6 +56,7 @@ namespace {
 constexpr std::uint32_t kResponseConnect = 3;
 constexpr std::uint32_t kResponseDisconnect = 4;
 constexpr std::uint32_t kResponsePublishTrack = 5;
+constexpr std::uint32_t kResponseUnpublishTrack = 6;
 constexpr std::uint32_t kResponseGetSessionStats = 12;
 constexpr std::uint32_t kResponseCreateVideoTrack = 15;
 constexpr std::uint32_t kResponseCreateAudioTrack = 16;
@@ -59,6 +75,7 @@ constexpr const char *kScreenShareName = "screen";
 // URL and are never forwarded.
 constexpr const char *kConnectFailed = "LiveKit connection failed";
 constexpr const char *kPublishFailed = "LiveKit publish failed";
+constexpr const char *kUnpublishFailed = "LiveKit unpublish failed";
 constexpr const char *kMuteFailed = "LiveKit mute failed";
 constexpr const char *kConnectionLost = "LiveKit disconnected";
 constexpr const char *kEncryptionFailed = "LiveKit media encryption failed";
@@ -249,7 +266,40 @@ bool PublishTrack(
 		LiveKitAdapterShared &state,
 		std::uint64_t trackHandle,
 		LiveKitTrackSource source,
+		LiveKitPublishKind kind,
+		std::optional<bool> simulcast);
+
+bool PublishInFlight(
+		const LiveKitAdapterShared &state,
 		LiveKitPublishKind kind);
+
+bool UnpublishInFlight(
+		const LiveKitAdapterShared &state,
+		LiveKitPublishKind kind);
+
+bool CancelQueuedUnpublish(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind);
+
+bool SendUnpublish(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind);
+
+bool UnpublishKind(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind);
+
+void ReleasePublicationHandle(
+		LiveKitAdapterShared &state,
+		std::uint64_t handle);
+
+void ReleaseLocalPublication(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind);
+
+void DispatchUnpublish(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event);
 
 bool SetTrackMuted(
 		LiveKitAdapterShared &state,
@@ -338,6 +388,9 @@ struct LiveKitAdapterShared final {
 	bool cameraEnabled = true;
 	bool screenShareEnabled = true;
 	bool noiseSuppression = true;
+	// The simulcast of the camera and screen share publishes. It is written to
+	// their publish options only once it is set.
+	std::optional<bool> videoSimulcast;
 	std::vector<std::uint8_t> sharedKey;
 	std::string playoutDeviceId;
 	std::string recordingDeviceId;
@@ -356,6 +409,13 @@ struct LiveKitAdapterShared final {
 	std::optional<std::uint64_t> connectAsyncId;
 	std::optional<std::uint64_t> disconnectAsyncId;
 	std::map<std::uint64_t, LiveKitPublishKind> publishAsyncIds;
+	// The unpublish requests in flight, by their async id, and the kinds whose
+	// publish is in flight and must be unpublished when it confirms.
+	std::map<std::uint64_t, LiveKitUnpublishRequest> unpublishAsyncIds;
+	std::set<LiveKitPublishKind> unpublishOnConfirm;
+	// The publications of the room by kind, with their sids. Their handles are also
+	// kept in publicationHandles, which owns them.
+	std::map<LiveKitPublishKind, LiveKitLocalPublication> localPublications;
 	std::set<std::uint64_t> statsAsyncIds;
 	std::map<std::string, LiveKitRemoteTrack> remoteTracks;
 	std::map<std::string, LiveKitRemotePublication> remotePublications;
@@ -516,13 +576,19 @@ bool LiveKitAdapter::publishMicrophone() {
 		state,
 		*state.audioTrackHandle,
 		LiveKitTrackSource::Microphone,
-		LiveKitPublishKind::Microphone);
+		LiveKitPublishKind::Microphone,
+		std::nullopt);
 }
 
 bool LiveKitAdapter::publishCamera(std::uint32_t width, std::uint32_t height) {
 	LiveKitAdapterShared &state = *shared;
-	if (state.phase != Phase::Connected || state.cameraRequested) {
+	if (state.phase != Phase::Connected) {
 		return false;
+	}
+	if (state.cameraRequested) {
+		// A camera publish in flight with an unpublish queued keeps the camera: the
+		// queued unpublish is cancelled. Any other camera publish is refused.
+		return CancelQueuedUnpublish(state, LiveKitPublishKind::Camera);
 	}
 	state.cameraRequested = true;
 	state.videoSourceHandle = RequestHandle(
@@ -553,15 +619,21 @@ bool LiveKitAdapter::publishCamera(std::uint32_t width, std::uint32_t height) {
 		state,
 		*state.videoTrackHandle,
 		LiveKitTrackSource::Camera,
-		LiveKitPublishKind::Camera);
+		LiveKitPublishKind::Camera,
+		state.videoSimulcast);
 }
 
 bool LiveKitAdapter::publishScreenShare(
 		std::uint32_t width,
 		std::uint32_t height) {
 	LiveKitAdapterShared &state = *shared;
-	if (state.phase != Phase::Connected || state.screenRequested) {
+	if (state.phase != Phase::Connected) {
 		return false;
+	}
+	if (state.screenRequested) {
+		// A screen share publish in flight with an unpublish queued keeps the screen
+		// share: the queued unpublish is cancelled. Any other publish is refused.
+		return CancelQueuedUnpublish(state, LiveKitPublishKind::ScreenShare);
 	}
 	state.screenRequested = true;
 	state.screenSourceHandle = RequestHandle(
@@ -592,7 +664,16 @@ bool LiveKitAdapter::publishScreenShare(
 		state,
 		*state.screenTrackHandle,
 		LiveKitTrackSource::ScreenShare,
-		LiveKitPublishKind::ScreenShare);
+		LiveKitPublishKind::ScreenShare,
+		state.videoSimulcast);
+}
+
+bool LiveKitAdapter::unpublishCamera() {
+	return UnpublishKind(*shared, LiveKitPublishKind::Camera);
+}
+
+bool LiveKitAdapter::unpublishScreenShare() {
+	return UnpublishKind(*shared, LiveKitPublishKind::ScreenShare);
 }
 
 bool LiveKitAdapter::captureVideoFrame(
@@ -728,6 +809,10 @@ bool LiveKitAdapter::setRemoteVideoQuality(
 	return confirmed;
 }
 
+void LiveKitAdapter::setVideoSimulcast(bool enabled) {
+	shared->videoSimulcast = enabled;
+}
+
 bool LiveKitAdapter::requestSessionStats() {
 	LiveKitAdapterShared &state = *shared;
 	if (state.phase != Phase::Connected || !state.roomHandle) {
@@ -847,6 +932,9 @@ void ReleaseAll(LiveKitAdapterShared &state) {
 		library.eventRouter().clearKeys(state.routeId);
 	}
 	state.publishAsyncIds.clear();
+	state.unpublishAsyncIds.clear();
+	state.unpublishOnConfirm.clear();
+	state.localPublications.clear();
 	state.statsAsyncIds.clear();
 	state.connectAsyncId.reset();
 	state.disconnectAsyncId.reset();
@@ -1094,7 +1182,8 @@ bool PublishTrack(
 		LiveKitAdapterShared &state,
 		std::uint64_t trackHandle,
 		LiveKitTrackSource source,
-		LiveKitPublishKind kind) {
+		LiveKitPublishKind kind,
+		std::optional<bool> simulcast) {
 	SendLog(state, std::string("publish requested: ") + PublishKindName(kind));
 	const std::uint64_t asyncId = NextRequestAsyncId();
 	AddKey(state, asyncId);
@@ -1104,7 +1193,8 @@ bool PublishTrack(
 				*state.localParticipantHandle,
 				trackHandle,
 				source,
-				asyncId));
+				asyncId,
+				simulcast));
 	if (!RequestAccepted(response, kResponsePublishTrack, asyncId)) {
 		SendLog(state, std::string("publish failed: ") + PublishKindName(kind));
 		FailWith(state, kPublishFailed);
@@ -1281,9 +1371,196 @@ void DispatchPublish(
 	}
 	AddKey(state, *event.publicationHandle);
 	state.publicationHandles.push_back(*event.publicationHandle);
+	LiveKitLocalPublication publication;
+	publication.handle = *event.publicationHandle;
+	publication.sid = event.trackSid;
+	state.localPublications[kind] = publication;
 	SendLog(state, std::string("publish confirmed: ") + PublishKindName(kind));
+	// An unpublish asked while the publish was in flight goes at once, and the
+	// publish is not reported to the delegate. A request that cannot be sent
+	// leaves the track published for good, so the room fails instead.
+	if (state.unpublishOnConfirm.erase(kind) > 0) {
+		if (!SendUnpublish(state, kind)) {
+			FailWith(state, kUnpublishFailed);
+		}
+		return;
+	}
 	if (state.delegate) {
 		state.delegate->liveKitPublished(kind);
+	}
+}
+
+// True while a publish of the kind waits for its callback.
+bool PublishInFlight(
+		const LiveKitAdapterShared &state,
+		LiveKitPublishKind kind) {
+	for (const std::pair<const std::uint64_t, LiveKitPublishKind> &entry
+			: state.publishAsyncIds) {
+		if (entry.second == kind) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// True while an unpublish of the kind waits for its callback.
+bool UnpublishInFlight(
+		const LiveKitAdapterShared &state,
+		LiveKitPublishKind kind) {
+	for (const std::pair<const std::uint64_t, LiveKitUnpublishRequest> &entry
+			: state.unpublishAsyncIds) {
+		if (entry.second.kind == kind) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Cancels the unpublish of the kind that is queued behind its publish in flight.
+// Returns false when no publish of the kind is in flight, or when none is queued.
+bool CancelQueuedUnpublish(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind) {
+	if (!PublishInFlight(state, kind)) {
+		return false;
+	}
+	if (state.unpublishOnConfirm.erase(kind) == 0) {
+		return false;
+	}
+	SendLog(state, std::string("unpublish cancelled: ") + PublishKindName(kind));
+	return true;
+}
+
+// Sends the unpublish of a published track, with the track stopped. The library
+// answers with an UnpublishTrackCallback that carries the request async id. A
+// publication without a sid is never sent, and a request that the library rejects
+// is reported as false; the caller then fails the room.
+bool SendUnpublish(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind) {
+	const std::map<LiveKitPublishKind, LiveKitLocalPublication>::iterator found =
+		state.localPublications.find(kind);
+	if (found == state.localPublications.end() || found->second.sid.empty()) {
+		SendLog(state, std::string("unpublish failed: ") + PublishKindName(kind));
+		return false;
+	}
+	SendLog(state, std::string("unpublish requested: ") + PublishKindName(kind));
+	const std::uint64_t asyncId = NextRequestAsyncId();
+	AddKey(state, asyncId);
+	const std::optional<std::vector<std::uint8_t>> response =
+		state.library->request(
+			EncodeLiveKitUnpublishTrackRequest(
+				*state.localParticipantHandle,
+				found->second.sid,
+				true,
+				asyncId));
+	if (!RequestAccepted(response, kResponseUnpublishTrack, asyncId)) {
+		RemoveKey(state, asyncId);
+		SendLog(state, std::string("unpublish failed: ") + PublishKindName(kind));
+		return false;
+	}
+	LiveKitUnpublishRequest request;
+	request.kind = kind;
+	request.handle = found->second.handle;
+	state.unpublishAsyncIds.emplace(asyncId, request);
+	return true;
+}
+
+// Unpublishes a published camera or screen share, or schedules the unpublish of
+// a publish that is still in flight. Returns false when nothing of the kind is
+// published or in flight. A request that cannot be sent fails the room, as a
+// failed publish does.
+bool UnpublishKind(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind) {
+	if (state.phase != Phase::Connected || !state.localParticipantHandle) {
+		return false;
+	}
+	if (UnpublishInFlight(state, kind)) {
+		return true;
+	}
+	if (state.localPublications.find(kind) != state.localPublications.end()) {
+		if (!SendUnpublish(state, kind)) {
+			FailWith(state, kUnpublishFailed);
+			return false;
+		}
+		return true;
+	}
+	if (PublishInFlight(state, kind)) {
+		state.unpublishOnConfirm.insert(kind);
+		return true;
+	}
+	return false;
+}
+
+// Releases a publication handle of the room. The handle leaves the bookkeeping
+// of the room before it is released, so teardown never releases it a second time.
+void ReleasePublicationHandle(
+		LiveKitAdapterShared &state,
+		std::uint64_t handle) {
+	if (std::erase(state.publicationHandles, handle) == 0) {
+		return;
+	}
+	RemoveKey(state, handle);
+	state.library->dropHandle(handle);
+}
+
+// Releases the publication of the kind with its track and its source, so the next
+// publish of the kind creates them again.
+void ReleaseLocalPublication(
+		LiveKitAdapterShared &state,
+		LiveKitPublishKind kind) {
+	LiveKitFfi &library = *state.library;
+	const std::map<LiveKitPublishKind, LiveKitLocalPublication>::iterator found =
+		state.localPublications.find(kind);
+	if (found != state.localPublications.end()) {
+		const std::uint64_t handle = found->second.handle;
+		state.localPublications.erase(found);
+		ReleasePublicationHandle(state, handle);
+	}
+	if (kind == LiveKitPublishKind::Camera) {
+		DropHandle(library, state.videoTrackHandle);
+		DropHandle(library, state.videoSourceHandle);
+		state.cameraRequested = false;
+	} else if (kind == LiveKitPublishKind::ScreenShare) {
+		DropHandle(library, state.screenTrackHandle);
+		DropHandle(library, state.screenSourceHandle);
+		state.screenRequested = false;
+	}
+}
+
+// The callback of an unpublish that the adapter sent. A confirmed unpublish
+// releases the publication that the request named, and the delegate hears of it.
+// A failed one fails the room, so no track is left published with no owner.
+void DispatchUnpublish(
+		LiveKitAdapterShared &state,
+		const LiveKitEvent &event) {
+	const std::map<std::uint64_t, LiveKitUnpublishRequest>::iterator it =
+		state.unpublishAsyncIds.find(event.asyncId);
+	if (it == state.unpublishAsyncIds.end()) {
+		return;
+	}
+	const LiveKitUnpublishRequest request = it->second;
+	state.unpublishAsyncIds.erase(it);
+	RemoveKey(state, event.asyncId);
+	if (!event.error.empty()) {
+		SendLog(state, std::string("unpublish failed: ") + PublishKindName(request.kind));
+		FailWith(state, kUnpublishFailed);
+		return;
+	}
+	SendLog(state, std::string("unpublish confirmed: ") + PublishKindName(request.kind));
+	const std::map<LiveKitPublishKind, LiveKitLocalPublication>::iterator current =
+		state.localPublications.find(request.kind);
+	if (current != state.localPublications.end()
+		&& current->second.handle == request.handle) {
+		ReleaseLocalPublication(state, request.kind);
+	} else {
+		// The publication of the request is not the current one of its kind, so
+		// only its own handle is released.
+		ReleasePublicationHandle(state, request.handle);
+	}
+	if (state.delegate) {
+		state.delegate->liveKitUnpublished(request.kind);
 	}
 }
 
@@ -1612,6 +1889,8 @@ void Dispatch(LiveKitAdapterShared &state, const LiveKitEvent &event) {
 		DispatchConnect(state, event);
 	} else if (event.kind == LiveKitEventKind::PublishTrack) {
 		DispatchPublish(state, event);
+	} else if (event.kind == LiveKitEventKind::UnpublishTrack) {
+		DispatchUnpublish(state, event);
 	} else if (event.kind == LiveKitEventKind::Disconnect) {
 		DispatchDisconnect(state, event);
 	} else if (event.kind == LiveKitEventKind::TrackSubscribed) {

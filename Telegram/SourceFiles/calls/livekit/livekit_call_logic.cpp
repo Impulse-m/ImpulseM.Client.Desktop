@@ -129,6 +129,82 @@ constexpr const char *kReplacementCharacter = "\xEF\xBF\xBD";
 	return result;
 }
 
+// The fields of one outbound video stream of the session stats. The index counts
+// the video streams only.
+[[nodiscard]] std::string FormatOutboundVideo(
+		std::size_t index,
+		const LiveKitOutboundRtpStats &item) {
+	char fps[32] = {};
+	std::snprintf(fps, sizeof(fps), "%.1f", item.framesPerSecond);
+	char bitrate[32] = {};
+	std::snprintf(bitrate, sizeof(bitrate), "%.0f", item.targetBitrate);
+	const std::string prefix = "out_video" + std::to_string(index) + "_";
+	const std::string rid = item.rid.empty() ? std::string("-") : item.rid;
+	std::string result;
+	result += " " + prefix + "rid=" + rid;
+	result += " " + prefix + "size=" + std::to_string(item.frameWidth)
+		+ "x" + std::to_string(item.frameHeight);
+	result += " " + prefix + "fps=" + fps;
+	result += " " + prefix + "encoded=" + std::to_string(item.framesEncoded);
+	result += " " + prefix + "sent=" + std::to_string(item.framesSent);
+	result += " " + prefix + "keyframes="
+		+ std::to_string(item.keyFramesEncoded);
+	result += " " + prefix + "retx="
+		+ std::to_string(item.retransmittedPacketsSent);
+	result += " " + prefix + "target_bps=" + bitrate;
+	result += " " + prefix + "limit="
+		+ LiveKitQualityLimitationName(item.qualityLimitationReason);
+	result += " " + prefix + "active=" + (item.active ? "1" : "0");
+	result += " " + prefix + "pli=" + std::to_string(item.pliCount);
+	result += " " + prefix + "nack=" + std::to_string(item.nackCount);
+	return result;
+}
+
+// The fields of one inbound video stream of the session stats. The index counts
+// the video streams only.
+[[nodiscard]] std::string FormatInboundVideo(
+		std::size_t index,
+		const LiveKitInboundRtpStats &item) {
+	char fps[32] = {};
+	std::snprintf(fps, sizeof(fps), "%.1f", item.framesPerSecond);
+	const std::string prefix = "in_video" + std::to_string(index) + "_";
+	std::string result;
+	result += " " + prefix + "size=" + std::to_string(item.frameWidth)
+		+ "x" + std::to_string(item.frameHeight);
+	result += " " + prefix + "fps=" + fps;
+	result += " " + prefix + "decoded="
+		+ std::to_string(item.framesDecoded.value_or(0U));
+	result += " " + prefix + "dropped=" + std::to_string(item.framesDropped);
+	result += " " + prefix + "keyframes=" + std::to_string(item.keyFramesDecoded);
+	result += " " + prefix + "freezes=" + std::to_string(item.freezeCount);
+	result += " " + prefix + "pauses=" + std::to_string(item.pauseCount);
+	return result;
+}
+
+// The captured frames of the call, since the previous stats line.
+[[nodiscard]] std::string FormatCaptureCounters(
+		const LiveKitCaptureCounters &capture) {
+	std::string result;
+	result += " video_frames_in=" + std::to_string(capture.received);
+	result += " video_frames_pushed=" + std::to_string(capture.pushed);
+	result += " video_frames_dropped="
+		+ std::to_string(capture.droppedNoCapture
+			+ capture.droppedPendingKind
+			+ capture.droppedNotConnected
+			+ capture.droppedEmptyFrame
+			+ capture.droppedPublishInFlight
+			+ capture.droppedLibraryRejected);
+	result += " drop_no_capture=" + std::to_string(capture.droppedNoCapture);
+	result += " drop_pending_kind=" + std::to_string(capture.droppedPendingKind);
+	result += " drop_not_connected=" + std::to_string(capture.droppedNotConnected);
+	result += " drop_empty=" + std::to_string(capture.droppedEmptyFrame);
+	result += " drop_publish_in_flight="
+		+ std::to_string(capture.droppedPublishInFlight);
+	result += " drop_library_rejected="
+		+ std::to_string(capture.droppedLibraryRejected);
+	return result;
+}
+
 } // namespace
 
 std::optional<LiveKitRemoteMedia> ChooseRemoteVideo(
@@ -208,7 +284,9 @@ LiveKitStatsSummary SummarizeStats(const LiveKitSessionStats &stats) {
 	return result;
 }
 
-std::string FormatStatsLine(const LiveKitSessionStats &stats) {
+std::string FormatStatsLine(
+		const LiveKitSessionStats &stats,
+		const std::optional<LiveKitCaptureCounters> &capture) {
 	if (stats.error) {
 		return "session stats: unavailable";
 	}
@@ -229,7 +307,143 @@ std::string FormatStatsLine(const LiveKitSessionStats &stats) {
 	result += " in_video_packets=" + std::to_string(summary.inboundVideoPackets);
 	result += " in_video_bytes=" + std::to_string(summary.inboundVideoBytes);
 	result += " in_video_frames=" + std::to_string(summary.inboundVideoFrames);
+	std::size_t outboundVideo = 0;
+	for (const LiveKitOutboundRtpStats &item : stats.outbound) {
+		if (item.kind == LiveKitTrackKind::Video) {
+			result += FormatOutboundVideo(outboundVideo, item);
+			++outboundVideo;
+		}
+	}
+	std::size_t inboundVideo = 0;
+	for (const LiveKitInboundRtpStats &item : stats.inbound) {
+		if (item.kind == LiveKitTrackKind::Video) {
+			result += FormatInboundVideo(inboundVideo, item);
+			++inboundVideo;
+		}
+	}
+	if (capture) {
+		result += FormatCaptureCounters(*capture);
+	}
 	return result;
+}
+
+void LiveKitCaptureCounters::addDrop(LiveKitVideoDrop reason) {
+	if (reason == LiveKitVideoDrop::NoCapture) {
+		++droppedNoCapture;
+	} else if (reason == LiveKitVideoDrop::PendingKind) {
+		++droppedPendingKind;
+	} else if (reason == LiveKitVideoDrop::NotConnected) {
+		++droppedNotConnected;
+	} else if (reason == LiveKitVideoDrop::EmptyFrame) {
+		++droppedEmptyFrame;
+	} else if (reason == LiveKitVideoDrop::PublishInFlight) {
+		++droppedPublishInFlight;
+	} else if (reason == LiveKitVideoDrop::LibraryRejected) {
+		++droppedLibraryRejected;
+	}
+}
+
+std::uint64_t LiveKitOutgoingVideo::attachCapture() {
+	attached = true;
+	kindPending = true;
+	confirmedKind = std::nullopt;
+	return ++generation;
+}
+
+std::optional<std::uint64_t> LiveKitOutgoingVideo::deviceSwitched() {
+	if (!attached) {
+		return std::nullopt;
+	}
+	kindPending = true;
+	return ++generation;
+}
+
+LiveKitVideoKindResult LiveKitOutgoingVideo::kindConfirmed(
+		std::uint64_t checkGeneration,
+		bool isScreen) {
+	LiveKitVideoKindResult result;
+	if (!attached || !kindPending || checkGeneration != generation) {
+		return result;
+	}
+	const LiveKitPublishKind kind = isScreen
+		? LiveKitPublishKind::ScreenShare
+		: LiveKitPublishKind::Camera;
+	kindPending = false;
+	confirmedKind = kind;
+	result.accepted = true;
+	// The published track of another kind is unpublished once. It stays published
+	// until the adapter confirms the unpublish.
+	if (publishedKind && *publishedKind != kind && !unpublishPending) {
+		result.unpublish = *publishedKind;
+		unpublishPending = true;
+	}
+	return result;
+}
+
+std::optional<LiveKitPublishKind> LiveKitOutgoingVideo::releaseCapture() {
+	attached = false;
+	kindPending = false;
+	confirmedKind = std::nullopt;
+	// A kind check that is still running is stale from now on.
+	++generation;
+	if (!publishedKind || unpublishPending) {
+		return std::nullopt;
+	}
+	unpublishPending = true;
+	return publishedKind;
+}
+
+void LiveKitOutgoingVideo::unpublishConfirmed(LiveKitPublishKind kind) {
+	if (publishedKind == kind) {
+		publishedKind = std::nullopt;
+		unpublishPending = false;
+	}
+}
+
+void LiveKitOutgoingVideo::roomConnected() {
+	connected = true;
+}
+
+LiveKitVideoFrameDecision LiveKitOutgoingVideo::frame(
+		std::uint32_t width,
+		std::uint32_t height) {
+	LiveKitVideoFrameDecision result;
+	if (!attached) {
+		result.drop = LiveKitVideoDrop::NoCapture;
+		return result;
+	}
+	if (kindPending || !confirmedKind) {
+		result.drop = LiveKitVideoDrop::PendingKind;
+		return result;
+	}
+	if (!connected) {
+		result.drop = LiveKitVideoDrop::NotConnected;
+		return result;
+	}
+	if (!width || !height) {
+		result.drop = LiveKitVideoDrop::EmptyFrame;
+		return result;
+	}
+	// The published track of another kind waits until its unpublish is confirmed.
+	if (unpublishPending && publishedKind != confirmedKind) {
+		result.drop = LiveKitVideoDrop::PublishInFlight;
+		return result;
+	}
+	result.kind = *confirmedKind;
+	// A track of the same kind that is being unpublished is asked to publish
+	// again, which cancels its unpublish when the adapter has it queued.
+	result.action = (publishedKind == confirmedKind && !unpublishPending)
+		? LiveKitVideoFrameAction::Push
+		: LiveKitVideoFrameAction::PublishThenPush;
+	result.drop = LiveKitVideoDrop::None;
+	return result;
+}
+
+void LiveKitOutgoingVideo::publishResult(LiveKitPublishKind kind, bool started) {
+	if (started && attached && confirmedKind == kind) {
+		publishedKind = kind;
+		unpublishPending = false;
+	}
 }
 
 } // namespace Impulse

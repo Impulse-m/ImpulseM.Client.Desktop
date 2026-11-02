@@ -51,6 +51,7 @@ enum class LiveKitEventKind : std::uint8_t {
 	Unknown,
 	Connect,
 	PublishTrack,
+	UnpublishTrack,
 	Disconnect,
 	TrackSubscribed,
 	TrackUnsubscribed,
@@ -122,16 +123,32 @@ struct LiveKitPlatformAudioInfo final {
 	std::int32_t playoutDeviceCount = 0;
 };
 
-// An outbound RTP stream of the session, from the publisher stats.
+// An outbound RTP stream of the session, from the publisher stats. The rid, the
+// frame and the encoder fields describe a video stream. The quality limitation
+// reason is the QualityLimitationReason number of the library, named by
+// LiveKitQualityLimitationName.
 struct LiveKitOutboundRtpStats final {
 	LiveKitTrackKind kind = LiveKitTrackKind::Unknown;
 	std::uint64_t packetsSent = 0;
 	std::uint64_t bytesSent = 0;
+	std::string rid;
+	std::uint32_t frameWidth = 0;
+	std::uint32_t frameHeight = 0;
+	double framesPerSecond = 0.;
+	std::uint32_t framesSent = 0;
+	std::uint32_t framesEncoded = 0;
+	std::uint32_t keyFramesEncoded = 0;
+	std::uint64_t retransmittedPacketsSent = 0;
+	double targetBitrate = 0.;
+	std::uint32_t qualityLimitationReason = 0;
+	bool active = false;
+	std::uint32_t pliCount = 0;
+	std::uint32_t nackCount = 0;
 };
 
 // An inbound RTP stream of the session, from the subscriber stats. The audio
-// fields are filled for audio streams only, and framesDecoded for video streams
-// only.
+// fields are filled for audio streams only. The framesDecoded and the other
+// video fields are filled for video streams only.
 struct LiveKitInboundRtpStats final {
 	LiveKitTrackKind kind = LiveKitTrackKind::Unknown;
 	std::uint64_t packetsReceived = 0;
@@ -140,6 +157,13 @@ struct LiveKitInboundRtpStats final {
 	std::uint64_t totalSamplesReceived = 0;
 	double audioLevel = 0.;
 	std::optional<std::uint32_t> framesDecoded;
+	std::uint32_t keyFramesDecoded = 0;
+	std::uint32_t framesDropped = 0;
+	std::uint32_t frameWidth = 0;
+	std::uint32_t frameHeight = 0;
+	double framesPerSecond = 0.;
+	std::uint32_t freezeCount = 0;
+	std::uint32_t pauseCount = 0;
 };
 
 // The RTP stats of the session of a room. The error is set when the library
@@ -194,7 +218,8 @@ struct LiveKitEvent final {
 	// TrackPublished of a remote participant. The handle is set on a publish
 	// only and is owned by the adapter; the sid, the kind, the source and the
 	// muted state come from the publication info. TrackUnpublished names the
-	// publication by trackSid.
+	// publication by trackSid. PublishTrack, the callback of a local publish,
+	// sets the handle of the publication and its sid in trackSid.
 	std::optional<std::uint64_t> publicationHandle;
 	LiveKitTrackSource trackSource = LiveKitTrackSource::Unknown;
 	bool trackMuted = false;
@@ -327,11 +352,28 @@ struct LiveKitHandleResponse final {
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitNewVideoStreamRequest(
 	std::uint64_t trackHandle);
 
+// The simulcast is written to the publish options only when it is given, so a
+// request without it carries the same bytes as before the option existed.
 [[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitPublishTrackRequest(
 	std::uint64_t localParticipantHandle,
 	std::uint64_t trackHandle,
 	LiveKitTrackSource source,
+	std::optional<std::uint64_t> requestAsyncId,
+	std::optional<bool> simulcast = std::nullopt);
+
+// Unpublishes the local track of the publication sid. The answer is an
+// UnpublishTrackCallback with the request async id. With stopOnUnpublish the
+// library stops the track too.
+[[nodiscard]] std::vector<std::uint8_t> EncodeLiveKitUnpublishTrackRequest(
+	std::uint64_t localParticipantHandle,
+	const std::string &trackSid,
+	bool stopOnUnpublish,
 	std::optional<std::uint64_t> requestAsyncId);
+
+// The name of a QualityLimitationReason number of an outbound video stream:
+// "none", "cpu" or "bandwidth". The OTHER reason and every number the library
+// does not define are named "other".
+[[nodiscard]] std::string LiveKitQualityLimitationName(std::uint32_t reason);
 
 // Sets the mute state of a local audio or video track. The request is
 // synchronous: the response reports the state the library has now.

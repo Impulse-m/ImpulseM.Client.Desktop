@@ -1,12 +1,13 @@
 // LiveKit room adapter for 1:1 calls and group calls. It owns one room on the
 // library, connects the room with the E2EE shared key, publishes the microphone
-// (through PlatformAudio), a camera track and a screen share, subscribes to the
-// remote tracks, mutes the tracks, sets the video quality of the remote
-// participants, selects the audio devices, requests the session stats, and
-// disconnects. Remote audio plays through PlatformAudio, which is created when
-// the room connects. Remote video frames go to a sink. Library events reach the
-// adapter through the event router of the library, so two adapters on one
-// library each get only the events of their own room.
+// (through PlatformAudio), a camera track and a screen share, unpublishes the
+// camera and the screen share, subscribes to the remote tracks, mutes the
+// tracks, sets the video quality of the remote participants, selects the audio
+// devices, requests the session stats, and disconnects. Remote audio plays
+// through PlatformAudio, which is created when the room connects. Remote video
+// frames go to a sink. Library events reach the adapter through the event
+// router of the library, so two adapters on one library each get only the
+// events of their own room.
 // The remote audio volume is not set here: the pinned protocol has no request
 // for it.
 //
@@ -51,6 +52,8 @@ public:
 	bool publishMicrophone() override;
 	bool publishCamera(std::uint32_t width, std::uint32_t height) override;
 	bool publishScreenShare(std::uint32_t width, std::uint32_t height) override;
+	bool unpublishCamera() override;
+	bool unpublishScreenShare() override;
 	bool captureVideoFrame(
 		LiveKitPublishKind kind,
 		const LiveKitCapturedFrame &frame) override;
@@ -63,6 +66,7 @@ public:
 	bool setRemoteVideoQuality(
 		const std::string &participantIdentity,
 		LiveKitVideoQuality quality) override;
+	void setVideoSimulcast(bool enabled) override;
 	bool requestSessionStats() override;
 	void disconnect() override;
 	[[nodiscard]] bool connected() const override;

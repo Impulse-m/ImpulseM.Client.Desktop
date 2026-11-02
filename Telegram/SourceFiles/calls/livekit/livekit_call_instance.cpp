@@ -32,27 +32,25 @@ constexpr int kStatsIntervalMs = 5000;
 
 // Runs the task on the media thread of the capture, where the capture object
 // lives. A capture that is not the tgcalls implementation has no such object,
-// so the task is skipped for it.
-void PerformOnCapture(
+// so the task is skipped for it. Returns false when the task was skipped.
+bool PerformOnCapture(
 		const std::shared_ptr<tgcalls::VideoCaptureInterface> &capture,
 		std::function<void(tgcalls::VideoCaptureInterfaceObject *)> task) {
 	tgcalls::VideoCaptureInterfaceImpl *impl
 		= dynamic_cast<tgcalls::VideoCaptureInterfaceImpl *>(capture.get());
 	if (!impl) {
-		return;
+		return false;
 	}
 	impl->object()->perform(std::move(task));
+	return true;
 }
 
 // The capture object lives on the media thread, so the sink is attached there.
-// The screencast flag is read on the same thread, after the attach.
 void AttachCaptureSink(
 		const std::shared_ptr<tgcalls::VideoCaptureInterface> &capture,
-		const std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> &sink,
-		const std::shared_ptr<std::atomic<bool>> &screencast) {
-	PerformOnCapture(capture, [sink, screencast](
+		const std::shared_ptr<rtc::VideoSinkInterface<webrtc::VideoFrame>> &sink) {
+	PerformOnCapture(capture, [sink](
 			tgcalls::VideoCaptureInterfaceObject *object) {
-		screencast->store(object->isScreenCapture());
 		const webrtc::scoped_refptr<webrtc::VideoTrackSourceInterface> source
 			= object->source();
 		if (source) {
@@ -73,17 +71,6 @@ void DetachCaptureSink(
 		if (source) {
 			source->RemoveSink(sink.get());
 		}
-	});
-}
-
-// Reads the screencast flag of the capture on the media thread, where the
-// device switches are applied, so the flag follows the switch.
-void ReadScreencastFlag(
-		const std::shared_ptr<tgcalls::VideoCaptureInterface> &capture,
-		const std::shared_ptr<std::atomic<bool>> &screencast) {
-	PerformOnCapture(capture, [screencast](
-			tgcalls::VideoCaptureInterfaceObject *object) {
-		screencast->store(object->isScreenCapture());
 	});
 }
 
@@ -123,6 +110,9 @@ LiveKitInstance::LiveKitInstance(
 	// No remote video is shown until the first media snapshot names one, so the
 	// adapter copies no remote frame before that.
 	adapter->setShownVideoTrack(std::string());
+	// A 1:1 call publishes its camera and its screen share without simulcast,
+	// as Android does.
+	adapter->setVideoSimulcast(false);
 	statsTimer.setCallback([this] {
 		requestStats();
 	});
@@ -141,19 +131,15 @@ LiveKitInstance::LiveKitInstance(
 	// posted to the owner thread, and the guard keeps a frame that arrives after
 	// the instance is gone from touching it.
 	const std::shared_ptr<bool> guard = alive;
-	const std::shared_ptr<std::atomic<bool>> screencast = screencastFlag;
 	const LiveKitAdapter::Poster ownerPost = poster;
 	captureSink = std::make_shared<LiveKitCaptureSink>(
-		[this, guard, ownerPost, screencast](const webrtc::VideoFrame &frame) {
-			const LiveKitPublishKind kind = screencast->load()
-				? LiveKitPublishKind::ScreenShare
-				: LiveKitPublishKind::Camera;
+		[this, guard, ownerPost](const webrtc::VideoFrame &frame) {
 			// The planes are copied here, on the capture thread, so the owner
 			// thread gets only the owned copy of the frame.
 			const LiveKitCapturedFrame captured = ToCapturedFrame(frame);
-			ownerPost([this, guard, kind, captured]() {
+			ownerPost([this, guard, captured]() {
 				if (*guard) {
-					handleCapturedFrame(captured, kind);
+					handleCapturedFrame(captured);
 				}
 			});
 		});
@@ -280,29 +266,28 @@ void LiveKitInstance::setVideoCapture(
 	if (stopped) {
 		return;
 	}
-	if (videoCapture && videoCapture != capture) {
-		DetachCaptureSink(videoCapture, captureSink);
+	if (capture && capture == videoCapture) {
+		return;
 	}
-	videoCapture = std::move(capture);
-	if (videoCapture) {
-		AttachCaptureSink(videoCapture, captureSink, screencastFlag);
-		// The flag can still hold the kind of the previous capture. The kind of
-		// the first frame is the true one, and the frames correct it.
-		captureKind = screencastFlag->load()
-			? LiveKitPublishKind::ScreenShare
-			: LiveKitPublishKind::Camera;
-		captureActive = true;
-	} else {
-		captureActive = false;
+	// The previous capture is released first. Its track is unpublished, and its
+	// sink leaves the source.
+	releaseCapture();
+	if (capture) {
+		videoCapture = std::move(capture);
+		AttachCaptureSink(videoCapture, captureSink);
+		checkCaptureKind(outgoingVideo.attachCapture());
 	}
-	applyCaptureState();
 }
 
 void LiveKitInstance::sendVideoDeviceUpdated() {
-	// A device switch of the capture reaches the media thread before this read,
-	// so the screencast flag follows the switch.
-	if (!stopped && videoCapture) {
-		ReadScreencastFlag(videoCapture, screencastFlag);
+	if (stopped || !videoCapture) {
+		return;
+	}
+	// The device switch is queued on the media thread before the kind check, so
+	// the kind is read after the switch.
+	const std::optional<std::uint64_t> generation = outgoingVideo.deviceSwitched();
+	if (generation) {
+		checkCaptureKind(*generation);
 	}
 }
 
@@ -357,6 +342,8 @@ void LiveKitInstance::liveKitConnected() {
 	if (!adapter->publishMicrophone()) {
 		return;
 	}
+	// The camera and the screen share are published only from here on.
+	outgoingVideo.roomConnected();
 	statsTimer.callEach(kStatsIntervalMs);
 	LOG(("LiveKit: established"));
 	if (stateUpdated) {
@@ -369,6 +356,12 @@ void LiveKitInstance::liveKitConnected() {
 
 void LiveKitInstance::liveKitPublished(LiveKitPublishKind) {
 	// A publication does not change the call state. Media wiring follows it.
+}
+
+void LiveKitInstance::liveKitUnpublished(LiveKitPublishKind kind) {
+	LOG(("LiveKit: unpublish confirmed: %1").arg(
+		QString::fromLatin1(CaptureKindName(kind))));
+	outgoingVideo.unpublishConfirmed(kind);
 }
 
 void LiveKitInstance::liveKitFailed(const std::string &message) {
@@ -395,6 +388,16 @@ void LiveKitInstance::liveKitVideoFrame(const LiveKitVideoFrame &frame) {
 	if (native) {
 		output->OnFrame(*native);
 	}
+	if (native && loggedFirstFrameSid != frame.trackSid) {
+		loggedFirstFrameSid = frame.trackSid;
+		const char *name = (frame.source == LiveKitTrackSource::ScreenShare)
+			? "screen share"
+			: "camera";
+		LOG(("LiveKit: remote video first frame: %1 %2x%3")
+			.arg(QString::fromLatin1(name))
+			.arg(QString::number(frame.width))
+			.arg(QString::number(frame.height)));
+	}
 }
 
 void LiveKitInstance::liveKitSessionStats(const LiveKitSessionStats &stats) {
@@ -403,11 +406,15 @@ void LiveKitInstance::liveKitSessionStats(const LiveKitSessionStats &stats) {
 	}
 	// The stats arrive every few seconds, so the line is written for debugging only.
 	if (Logs::DebugEnabled()) {
-		LOG(("LiveKit: %1").arg(QString::fromStdString(FormatStatsLine(stats))));
+		LOG(("LiveKit: %1").arg(QString::fromStdString(
+			FormatStatsLine(stats, captureCounters))));
 	}
 	if (stats.error) {
 		return;
 	}
+	// The captured frames are counted per stats interval, so the counters restart
+	// with every answered sample.
+	captureCounters = LiveKitCaptureCounters();
 	const LiveKitStatsSummary summary = SummarizeStats(stats);
 	const std::uint64_t sent = summary.outboundAudioBytes
 		+ summary.outboundVideoBytes;
@@ -492,78 +499,111 @@ void LiveKitInstance::requestStats() {
 	}
 }
 
+void LiveKitInstance::checkCaptureKind(std::uint64_t generation) {
+	const std::shared_ptr<bool> guard = alive;
+	const LiveKitAdapter::Poster ownerPost = poster;
+	// The kind is read on the media thread, where the capture object lives. The
+	// answer goes back to the owner thread with the generation of the check. A
+	// capture without that object never answers, so its frames wait as pending.
+	const bool reached = PerformOnCapture(
+		videoCapture,
+		[this, guard, ownerPost, generation](
+				tgcalls::VideoCaptureInterfaceObject *object) {
+			const bool isScreen = object->isScreenCapture();
+			ownerPost([this, guard, generation, isScreen]() {
+				if (*guard) {
+					captureKindConfirmed(generation, isScreen);
+				}
+			});
+		});
+	if (!reached) {
+		LOG(("LiveKit: capture kind check unavailable"));
+	}
+}
+
+void LiveKitInstance::captureKindConfirmed(
+		std::uint64_t generation,
+		bool isScreen) {
+	if (stopped) {
+		return;
+	}
+	const LiveKitVideoKindResult result = outgoingVideo.kindConfirmed(
+		generation,
+		isScreen);
+	if (!result.accepted) {
+		return;
+	}
+	const LiveKitPublishKind kind = isScreen
+		? LiveKitPublishKind::ScreenShare
+		: LiveKitPublishKind::Camera;
+	LOG(("LiveKit: video kind confirmed: %1").arg(
+		QString::fromLatin1(CaptureKindName(kind))));
+	if (result.unpublish) {
+		unpublishKind(*result.unpublish);
+	}
+}
+
 void LiveKitInstance::releaseCapture() {
-	captureActive = false;
 	if (videoCapture) {
 		DetachCaptureSink(videoCapture, captureSink);
 		videoCapture = nullptr;
 	}
-}
-
-void LiveKitInstance::applyCaptureState() {
-	if (stopped || !adapter->connected()) {
-		return;
-	}
-	// The track of the current kind follows the capture, and the other kind is
-	// disabled. A track is changed only when it is published and its state
-	// differs, so the requests are sent on the changes only.
-	const bool cameraWanted = captureActive
-		&& captureKind == LiveKitPublishKind::Camera;
-	const bool screenWanted = captureActive
-		&& captureKind == LiveKitPublishKind::ScreenShare;
-	if (cameraPublished && cameraEnabled != cameraWanted) {
-		cameraEnabled = cameraWanted;
-		adapter->setCameraEnabled(cameraWanted);
-	}
-	if (screenPublished && screenEnabled != screenWanted) {
-		screenEnabled = screenWanted;
-		adapter->setScreenShareEnabled(screenWanted);
+	const std::optional<LiveKitPublishKind> unpublish
+		= outgoingVideo.releaseCapture();
+	// A stopped call leaves the room with its tracks, so nothing is unpublished.
+	if (unpublish && !stopped) {
+		unpublishKind(*unpublish);
 	}
 }
 
-void LiveKitInstance::handleCapturedFrame(
-		const LiveKitCapturedFrame &captured,
-		LiveKitPublishKind kind) {
-	// Frames before the room is connected, and frames of a capture that is no
-	// longer active, are dropped.
-	if (stopped || !captureActive || !adapter->connected()) {
+void LiveKitInstance::unpublishKind(LiveKitPublishKind kind) {
+	const char *name = CaptureKindName(kind);
+	LOG(("LiveKit: unpublish requested: %1").arg(QString::fromLatin1(name)));
+	const bool requested = (kind == LiveKitPublishKind::ScreenShare)
+		? adapter->unpublishScreenShare()
+		: adapter->unpublishCamera();
+	if (!requested) {
+		LOG(("LiveKit: unpublish not accepted: %1").arg(
+			QString::fromLatin1(name)));
+	}
+}
+
+void LiveKitInstance::handleCapturedFrame(const LiveKitCapturedFrame &captured) {
+	if (stopped) {
 		return;
 	}
-	if (kind != captureKind) {
-		captureKind = kind;
-		LOG(("LiveKit: video source is %1").arg(
-			QString::fromLatin1(CaptureKindName(kind))));
-		applyCaptureState();
-	}
-	if (!captured.width) {
+	++captureCounters.received;
+	const LiveKitVideoFrameDecision decision = outgoingVideo.frame(
+		captured.width,
+		captured.height);
+	if (decision.action == LiveKitVideoFrameAction::Drop) {
+		captureCounters.addDrop(decision.drop);
 		return;
 	}
-	const bool screen = (kind == LiveKitPublishKind::ScreenShare);
-	bool &published = screen ? screenPublished : cameraPublished;
-	if (!published) {
+	if (decision.action == LiveKitVideoFrameAction::PublishThenPush) {
 		// The source is created with the size of the first frame. A publish that
 		// fails fails the room. A publish that returns false while the room stays
-		// connected is already in flight, and the frames that arrive meanwhile are
-		// dropped.
+		// connected is already in flight, so this frame is dropped and the next
+		// frame asks again.
+		const bool screen = (decision.kind == LiveKitPublishKind::ScreenShare);
 		const bool started = screen
 			? adapter->publishScreenShare(captured.width, captured.height)
 			: adapter->publishCamera(captured.width, captured.height);
+		outgoingVideo.publishResult(decision.kind, started);
 		if (!started) {
+			captureCounters.addDrop(LiveKitVideoDrop::PublishInFlight);
 			return;
 		}
-		published = true;
-		if (screen) {
-			screenEnabled = true;
-		} else {
-			cameraEnabled = true;
-		}
 		LOG(("LiveKit: %1 published, %2x%3")
-			.arg(QString::fromLatin1(CaptureKindName(kind)))
+			.arg(QString::fromLatin1(CaptureKindName(decision.kind)))
 			.arg(QString::number(captured.width))
 			.arg(QString::number(captured.height)));
-		applyCaptureState();
 	}
-	adapter->captureVideoFrame(kind, captured);
+	if (adapter->captureVideoFrame(decision.kind, captured)) {
+		++captureCounters.pushed;
+	} else {
+		captureCounters.addDrop(LiveKitVideoDrop::LibraryRejected);
+	}
 }
 
 void LiveKitInstance::fail(const std::string &message) {

@@ -66,6 +66,29 @@ LiveKitRemoteMedia Microphone(bool subscribed, bool muted) {
 		muted);
 }
 
+using Impulse::LiveKitCaptureCounters;
+using Impulse::LiveKitOutgoingVideo;
+using Impulse::LiveKitPublishKind;
+using Impulse::LiveKitVideoDrop;
+using Impulse::LiveKitVideoFrameAction;
+using Impulse::LiveKitVideoFrameDecision;
+using Impulse::LiveKitVideoKindResult;
+
+// Attaches a capture and answers its kind check, so the frames are decided.
+std::uint64_t AttachAndConfirm(LiveKitOutgoingVideo &video, bool isScreen) {
+	const std::uint64_t generation = video.attachCapture();
+	IMPULSE_CHECK(video.kindConfirmed(generation, isScreen).accepted);
+	return generation;
+}
+
+// Takes the publish decision of the first frame and records the publish as
+// started, as the instance does when the adapter accepts it.
+void PublishOnFirstFrame(LiveKitOutgoingVideo &video) {
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	video.publishResult(decision.kind, true);
+}
+
 } // namespace
 
 IMPULSE_TEST(CallLogicRemoteVideoPrefersScreenShare) {
@@ -316,4 +339,403 @@ IMPULSE_TEST(CallLogicSubscribedBeforePublishIsNotShown) {
 	if (shown) {
 		IMPULSE_CHECK(shown->source == LiveKitTrackSource::ScreenShare);
 	}
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoDropsWithoutCapture) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::Drop);
+	IMPULSE_CHECK(decision.drop == LiveKitVideoDrop::NoCapture);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoDropsWhileKindPending) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	const std::uint64_t generation = video.attachCapture();
+	const LiveKitVideoFrameDecision pending = video.frame(1280, 720);
+	IMPULSE_CHECK(pending.action == LiveKitVideoFrameAction::Drop);
+	IMPULSE_CHECK(pending.drop == LiveKitVideoDrop::PendingKind);
+	IMPULSE_CHECK(video.kindConfirmed(generation, false).accepted);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::Camera);
+	IMPULSE_CHECK(decision.drop == LiveKitVideoDrop::None);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoDropsBeforeConnect) {
+	LiveKitOutgoingVideo video;
+	AttachAndConfirm(video, false);
+	const LiveKitVideoFrameDecision early = video.frame(1280, 720);
+	IMPULSE_CHECK(early.action == LiveKitVideoFrameAction::Drop);
+	IMPULSE_CHECK(early.drop == LiveKitVideoDrop::NotConnected);
+	video.roomConnected();
+	const LiveKitVideoFrameDecision connected = video.frame(1280, 720);
+	IMPULSE_CHECK(connected.action == LiveKitVideoFrameAction::PublishThenPush);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoDropsEmptyFrame) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	IMPULSE_CHECK(video.frame(0, 720).drop == LiveKitVideoDrop::EmptyFrame);
+	IMPULSE_CHECK(video.frame(1280, 0).drop == LiveKitVideoDrop::EmptyFrame);
+	IMPULSE_CHECK(video.frame(1280, 0).action == LiveKitVideoFrameAction::Drop);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::PublishThenPush);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoPushesAfterPublish) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	const LiveKitVideoFrameDecision next = video.frame(1280, 720);
+	IMPULSE_CHECK(next.action == LiveKitVideoFrameAction::Push);
+	IMPULSE_CHECK(next.kind == LiveKitPublishKind::Camera);
+	IMPULSE_CHECK(next.drop == LiveKitVideoDrop::None);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoRefusedPublishAsksAgain) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, true);
+	const LiveKitVideoFrameDecision first = video.frame(1280, 720);
+	IMPULSE_CHECK(first.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(first.kind == LiveKitPublishKind::ScreenShare);
+	video.publishResult(LiveKitPublishKind::ScreenShare, false);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::PublishThenPush);
+	video.publishResult(LiveKitPublishKind::ScreenShare, true);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::Push);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoStaleKindCheckIgnored) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	const std::uint64_t first = video.attachCapture();
+	const std::optional<std::uint64_t> second = video.deviceSwitched();
+	IMPULSE_CHECK(second.has_value());
+	const std::uint64_t secondGeneration = second.value_or(0);
+	IMPULSE_CHECK(!video.kindConfirmed(first, true).accepted);
+	IMPULSE_CHECK(video.frame(1280, 720).drop == LiveKitVideoDrop::PendingKind);
+	IMPULSE_CHECK(video.kindConfirmed(secondGeneration, true).accepted);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::ScreenShare);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoKindCheckAnsweredOnce) {
+	LiveKitOutgoingVideo video;
+	const std::uint64_t generation = video.attachCapture();
+	IMPULSE_CHECK(video.kindConfirmed(generation, false).accepted);
+	IMPULSE_CHECK(!video.kindConfirmed(generation, true).accepted);
+	IMPULSE_CHECK(!video.releaseCapture().has_value());
+	IMPULSE_CHECK(!video.kindConfirmed(generation, false).accepted);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoDeviceSwitchNeedsCapture) {
+	LiveKitOutgoingVideo video;
+	IMPULSE_CHECK(!video.deviceSwitched().has_value());
+	AttachAndConfirm(video, false);
+	IMPULSE_CHECK(video.deviceSwitched().has_value());
+	IMPULSE_CHECK(!video.releaseCapture().has_value());
+	IMPULSE_CHECK(!video.deviceSwitched().has_value());
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoDeviceSwitchSameKindKeepsTrack) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	const std::optional<std::uint64_t> generation = video.deviceSwitched();
+	IMPULSE_CHECK(generation.has_value());
+	IMPULSE_CHECK(video.frame(1280, 720).drop == LiveKitVideoDrop::PendingKind);
+	const LiveKitVideoKindResult result = video.kindConfirmed(
+		generation.value_or(0),
+		false);
+	IMPULSE_CHECK(result.accepted);
+	IMPULSE_CHECK(!result.unpublish.has_value());
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::Push);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoCameraToScreenUnpublishesCamera) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	const std::optional<std::uint64_t> generation = video.deviceSwitched();
+	const LiveKitVideoKindResult result = video.kindConfirmed(
+		generation.value_or(0),
+		true);
+	IMPULSE_CHECK(result.accepted);
+	IMPULSE_CHECK(result.unpublish == LiveKitPublishKind::Camera);
+	// The screen share waits until the camera is gone from the room.
+	IMPULSE_CHECK(video.frame(1280, 720).drop == LiveKitVideoDrop::PublishInFlight);
+	video.unpublishConfirmed(LiveKitPublishKind::Camera);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::ScreenShare);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoScreenToCameraUnpublishesScreen) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, true);
+	PublishOnFirstFrame(video);
+	const std::optional<std::uint64_t> generation = video.deviceSwitched();
+	const LiveKitVideoKindResult result = video.kindConfirmed(
+		generation.value_or(0),
+		false);
+	IMPULSE_CHECK(result.accepted);
+	IMPULSE_CHECK(result.unpublish == LiveKitPublishKind::ScreenShare);
+	// The camera waits until the screen share is gone from the room.
+	IMPULSE_CHECK(video.frame(1280, 720).drop == LiveKitVideoDrop::PublishInFlight);
+	video.unpublishConfirmed(LiveKitPublishKind::ScreenShare);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::Camera);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoReleaseReturnsPublishedKind) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, true);
+	PublishOnFirstFrame(video);
+	IMPULSE_CHECK(video.releaseCapture() == LiveKitPublishKind::ScreenShare);
+	IMPULSE_CHECK(!video.releaseCapture().has_value());
+	IMPULSE_CHECK(video.frame(1280, 720).drop == LiveKitVideoDrop::NoCapture);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoReleaseWithoutPublishUnpublishesNothing) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	IMPULSE_CHECK(!video.releaseCapture().has_value());
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoCameraScreenCameraWithRelease) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	IMPULSE_CHECK(video.releaseCapture() == LiveKitPublishKind::Camera);
+	video.unpublishConfirmed(LiveKitPublishKind::Camera);
+
+	AttachAndConfirm(video, true);
+	const LiveKitVideoFrameDecision screen = video.frame(1280, 720);
+	IMPULSE_CHECK(screen.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(screen.kind == LiveKitPublishKind::ScreenShare);
+	video.publishResult(LiveKitPublishKind::ScreenShare, true);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::Push);
+	IMPULSE_CHECK(video.releaseCapture() == LiveKitPublishKind::ScreenShare);
+	video.unpublishConfirmed(LiveKitPublishKind::ScreenShare);
+
+	AttachAndConfirm(video, false);
+	const LiveKitVideoFrameDecision camera = video.frame(1280, 720);
+	IMPULSE_CHECK(camera.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(camera.kind == LiveKitPublishKind::Camera);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoReattachSameKindPublishesFreshTrack) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	IMPULSE_CHECK(video.releaseCapture() == LiveKitPublishKind::Camera);
+	AttachAndConfirm(video, false);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::Camera);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoStaleGenerationAfterRelease) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	const std::uint64_t first = video.attachCapture();
+	IMPULSE_CHECK(!video.releaseCapture().has_value());
+	const std::uint64_t second = video.attachCapture();
+	IMPULSE_CHECK(first != second);
+	IMPULSE_CHECK(!video.kindConfirmed(first, true).accepted);
+	IMPULSE_CHECK(video.kindConfirmed(second, false).accepted);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::Camera);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoLateResultAfterReleaseIgnored) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(!video.releaseCapture().has_value());
+	video.publishResult(LiveKitPublishKind::Camera, true);
+	AttachAndConfirm(video, false);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::PublishThenPush);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoSameKindSwitchCancelsUnpublish) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+
+	// The camera goes to a screen share and back before the unpublish confirms.
+	const std::optional<std::uint64_t> toScreen = video.deviceSwitched();
+	const LiveKitVideoKindResult unpublish = video.kindConfirmed(
+		toScreen.value_or(0),
+		true);
+	IMPULSE_CHECK(unpublish.unpublish == LiveKitPublishKind::Camera);
+	const std::optional<std::uint64_t> toCamera = video.deviceSwitched();
+	const LiveKitVideoKindResult back = video.kindConfirmed(
+		toCamera.value_or(0),
+		false);
+	IMPULSE_CHECK(back.accepted);
+	IMPULSE_CHECK(!back.unpublish.has_value());
+
+	// The camera publishes again, which the adapter takes as the cancel of its
+	// queued unpublish, and the track is kept with no new publish cycle.
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::Camera);
+	video.publishResult(LiveKitPublishKind::Camera, true);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::Push);
+	IMPULSE_CHECK(video.releaseCapture() == LiveKitPublishKind::Camera);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoRefusedCancelKeepsDroppingUntilConfirmed) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	const std::optional<std::uint64_t> toScreen = video.deviceSwitched();
+	IMPULSE_CHECK(video.kindConfirmed(toScreen.value_or(0), true).unpublish.has_value());
+
+	// Back to the camera while the unpublish is already sent: the adapter refuses
+	// the publish, so the frames wait for the unpublish callback.
+	const std::optional<std::uint64_t> toCamera = video.deviceSwitched();
+	IMPULSE_CHECK(!video.kindConfirmed(toCamera.value_or(0), false).unpublish.has_value());
+	const LiveKitVideoFrameDecision asking = video.frame(1280, 720);
+	IMPULSE_CHECK(asking.action == LiveKitVideoFrameAction::PublishThenPush);
+	video.publishResult(LiveKitPublishKind::Camera, false);
+	IMPULSE_CHECK(video.frame(1280, 720).action == LiveKitVideoFrameAction::PublishThenPush);
+
+	// The callback confirms the unpublish, and the next frame publishes fresh.
+	video.unpublishConfirmed(LiveKitPublishKind::Camera);
+	const LiveKitVideoFrameDecision fresh = video.frame(1280, 720);
+	IMPULSE_CHECK(fresh.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(fresh.kind == LiveKitPublishKind::Camera);
+}
+
+IMPULSE_TEST(CallLogicOutgoingVideoReleaseWaitsForUnpublishConfirm) {
+	LiveKitOutgoingVideo video;
+	video.roomConnected();
+	AttachAndConfirm(video, false);
+	PublishOnFirstFrame(video);
+	IMPULSE_CHECK(video.releaseCapture() == LiveKitPublishKind::Camera);
+
+	// A screen share after the release waits for the camera to be gone.
+	AttachAndConfirm(video, true);
+	IMPULSE_CHECK(video.frame(1280, 720).drop == LiveKitVideoDrop::PublishInFlight);
+	video.unpublishConfirmed(LiveKitPublishKind::Camera);
+	const LiveKitVideoFrameDecision decision = video.frame(1280, 720);
+	IMPULSE_CHECK(decision.action == LiveKitVideoFrameAction::PublishThenPush);
+	IMPULSE_CHECK(decision.kind == LiveKitPublishKind::ScreenShare);
+}
+
+IMPULSE_TEST(CallLogicCaptureCountersCountDropsByReason) {
+	LiveKitCaptureCounters counters;
+	counters.addDrop(LiveKitVideoDrop::NoCapture);
+	counters.addDrop(LiveKitVideoDrop::PendingKind);
+	counters.addDrop(LiveKitVideoDrop::PendingKind);
+	counters.addDrop(LiveKitVideoDrop::NotConnected);
+	counters.addDrop(LiveKitVideoDrop::EmptyFrame);
+	counters.addDrop(LiveKitVideoDrop::PublishInFlight);
+	counters.addDrop(LiveKitVideoDrop::LibraryRejected);
+	counters.addDrop(LiveKitVideoDrop::None);
+	IMPULSE_CHECK(counters.droppedNoCapture == 1);
+	IMPULSE_CHECK(counters.droppedPendingKind == 2);
+	IMPULSE_CHECK(counters.droppedNotConnected == 1);
+	IMPULSE_CHECK(counters.droppedEmptyFrame == 1);
+	IMPULSE_CHECK(counters.droppedPublishInFlight == 1);
+	IMPULSE_CHECK(counters.droppedLibraryRejected == 1);
+	IMPULSE_CHECK(counters.pushed == 0);
+}
+
+IMPULSE_TEST(CallLogicStatsLineReportsVideoStreams) {
+	using Impulse::FormatStatsLine;
+	Impulse::LiveKitSessionStats stats;
+	Impulse::LiveKitOutboundRtpStats outVideo;
+	outVideo.kind = LiveKitTrackKind::Video;
+	outVideo.rid = "h";
+	outVideo.frameWidth = 1280;
+	outVideo.frameHeight = 720;
+	outVideo.framesPerSecond = 30.0;
+	outVideo.framesEncoded = 100;
+	outVideo.framesSent = 99;
+	outVideo.keyFramesEncoded = 3;
+	outVideo.retransmittedPacketsSent = 2;
+	outVideo.targetBitrate = 1200000.0;
+	outVideo.qualityLimitationReason = 1;
+	outVideo.active = true;
+	outVideo.pliCount = 1;
+	outVideo.nackCount = 4;
+	outVideo.bytesSent = 900;
+	Impulse::LiveKitOutboundRtpStats lowVideo = outVideo;
+	lowVideo.rid = "";
+	lowVideo.qualityLimitationReason = 0;
+	lowVideo.active = false;
+	stats.outbound = { outVideo, lowVideo };
+
+	Impulse::LiveKitInboundRtpStats inVideo;
+	inVideo.kind = LiveKitTrackKind::Video;
+	inVideo.frameWidth = 640;
+	inVideo.frameHeight = 360;
+	inVideo.framesPerSecond = 24.5;
+	inVideo.framesDecoded = 50U;
+	inVideo.framesDropped = 2;
+	inVideo.keyFramesDecoded = 1;
+	inVideo.freezeCount = 3;
+	inVideo.pauseCount = 0;
+	stats.inbound = { inVideo };
+
+	const std::string line = FormatStatsLine(stats);
+	IMPULSE_CHECK(line.find(" out_video0_rid=h") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_size=1280x720") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_fps=30.0") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_encoded=100") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_sent=99") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_keyframes=3") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_retx=2") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_target_bps=1200000") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_limit=cpu") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_active=1") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_pli=1") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video0_nack=4") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video1_rid=-") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video1_active=0") != std::string::npos);
+	IMPULSE_CHECK(line.find(" out_video1_limit=none") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_size=640x360") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_fps=24.5") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_decoded=50") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_dropped=2") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_keyframes=1") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_freezes=3") != std::string::npos);
+	IMPULSE_CHECK(line.find(" in_video0_pauses=0") != std::string::npos);
+	IMPULSE_CHECK(line.find("video_frames_in") == std::string::npos);
+}
+
+IMPULSE_TEST(CallLogicStatsLineAppendsCaptureCounters) {
+	using Impulse::FormatStatsLine;
+	Impulse::LiveKitSessionStats stats;
+	LiveKitCaptureCounters counters;
+	counters.received = 10;
+	counters.pushed = 7;
+	counters.droppedPendingKind = 2;
+	counters.droppedPublishInFlight = 1;
+	const std::string line = FormatStatsLine(stats, counters);
+	IMPULSE_CHECK(line.find(" video_frames_in=10") != std::string::npos);
+	IMPULSE_CHECK(line.find(" video_frames_pushed=7") != std::string::npos);
+	IMPULSE_CHECK(line.find(" video_frames_dropped=3") != std::string::npos);
+	IMPULSE_CHECK(line.find(" drop_pending_kind=2") != std::string::npos);
+	IMPULSE_CHECK(line.find(" drop_publish_in_flight=1") != std::string::npos);
+	IMPULSE_CHECK(line.find(" drop_no_capture=0") != std::string::npos);
 }

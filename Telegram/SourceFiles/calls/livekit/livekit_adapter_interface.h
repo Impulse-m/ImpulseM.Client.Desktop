@@ -81,8 +81,13 @@ public:
 	virtual void liveKitConnected() = 0;
 	virtual void liveKitPublished(LiveKitPublishKind kind) = 0;
 
-	// Fires when the room fails: a connect or publish fails, the room is
-	// dropped by the server, or a track reports an E2EE failure state. The
+	// Fires once the library confirms the unpublish of the kind, when the track
+	// is gone from the room. It does not fire for a publish that was cancelled
+	// before it confirmed.
+	virtual void liveKitUnpublished(LiveKitPublishKind) {}
+
+	// Fires when the room fails: a connect, publish or unpublish fails, the room
+	// is dropped by the server, or a track reports an E2EE failure state. The
 	// room is released before the call.
 	virtual void liveKitFailed(const std::string &message) = 0;
 	virtual void liveKitDisconnected() = 0;
@@ -146,6 +151,18 @@ public:
 		std::uint32_t width,
 		std::uint32_t height) = 0;
 
+	// Unpublishes the camera, or the screen share, as the kind names it: the
+	// track is unpublished and stopped, and its source and track are released, so
+	// the next publish of the kind creates them again. A publish still in flight
+	// is unpublished when it confirms, and liveKitPublished does not fire for it.
+	// A publish of the kind that is in flight with such an unpublish queued cancels
+	// the queued unpublish, and the publish is then kept. Returns false when nothing
+	// of the kind is published or in flight. A request that the library rejects,
+	// and a failed unpublish callback, fail the room, as a failed publish does.
+	// liveKitUnpublished fires once the track is gone from the room.
+	virtual bool unpublishCamera() = 0;
+	virtual bool unpublishScreenShare() = 0;
+
 	// Pushes one I420 frame into the source of the camera or of the screen share.
 	// Returns false when the room is not connected, the source of the kind is
 	// not published, the frame has no usable planes, or the library rejects the
@@ -204,6 +221,12 @@ public:
 	virtual bool setRemoteVideoQuality(
 		const std::string &participantIdentity,
 		LiveKitVideoQuality quality) = 0;
+
+	// Sets the simulcast of the camera and screen share publications. Once set,
+	// every later camera and screen share publish writes the simulcast option with
+	// this value. Until it is set the option is not written, and the microphone
+	// never writes it.
+	virtual void setVideoSimulcast(bool enabled) = 0;
 
 	// Requests the RTP stats of the session of the connected room. The answer
 	// arrives through liveKitSessionStats. Returns false when the room is not
